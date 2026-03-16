@@ -184,7 +184,7 @@ func TestFindByIP(t *testing.T) {
 		t.Fatal("FindByIP() returned nil")
 	}
 
-	if !found.MAC.Equal(mac) {
+	if found.MAC.String() != mac.String() {
 		t.Errorf("Found lease MAC = %s, want %s", found.MAC.String(), mac.String())
 	}
 
@@ -571,7 +571,7 @@ func TestLeaseJSON(t *testing.T) {
 	}
 
 	// Verify all fields
-	if !restored.MAC.Equal(mac) {
+	if restored.MAC.String() != mac.String() {
 		t.Errorf("MAC mismatch: %s vs %s", restored.MAC.String(), mac.String())
 	}
 
