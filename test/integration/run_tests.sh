@@ -180,7 +180,7 @@ run_api_tests() {
     # Test: Metrics JSON contains expected fields
     local metrics
     metrics=$(curl -s "http://$SERVER:8080/api/metrics" 2>/dev/null)
-    assert_contains "API: Metrics has queries_total" "queries_total" "$metrics"
+    assert_contains "API: Metrics has QueriesTotal" "QueriesTotal" "$metrics"
 
     # Test: Leases JSON is valid JSON array
     local leases

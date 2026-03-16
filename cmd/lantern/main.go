@@ -226,6 +226,14 @@ func runServe(cmd *cobra.Command, args []string) error {
 	// 11. Create DNS server with upstream and blocker
 	dnsServer := lanterndns.New(cfg, upstreamResolver, blockMgr, metricsCollector, eventsStore)
 
+	// 11b. Register static hosts in the DNS zone
+	for _, lease := range leasePool.GetAllLeases() {
+		if lease.Static {
+			dnsServer.Zone().UpdateFromLease(lease)
+			logger.Info("registered static host in DNS", "name", lease.DNSName, "ip", lease.IP)
+		}
+	}
+
 	// 12. Create DHCP server with onLease callback that updates the DNS zone
 	onLease := func(lease *model.Lease) {
 		logger.Info("new lease granted",

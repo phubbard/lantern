@@ -73,31 +73,25 @@ func sendDHCPDiscover(clientMAC net.HardwareAddr, hostname string) (*dhcpv4.DHCP
 		discover.UpdateOption(dhcpv4.OptHostName(hostname))
 	}
 
-	// Listen for OFFER on port 68 before sending to avoid race conditions
-	listenConn, err := net.ListenUDP("udp4", &net.UDPAddr{Port: dhcpClientPort})
+	// Use a single socket for both sending and receiving on port 68
+	conn, err := net.ListenUDP("udp4", &net.UDPAddr{Port: dhcpClientPort})
 	if err != nil {
-		return nil, fmt.Errorf("failed to listen on UDP: %w", err)
+		return nil, fmt.Errorf("failed to listen on UDP port %d: %w", dhcpClientPort, err)
 	}
-	defer listenConn.Close()
+	defer conn.Close()
 
-	// Set read deadline
-	listenConn.SetReadDeadline(time.Now().Add(dhcpTimeout))
+	conn.SetReadDeadline(time.Now().Add(dhcpTimeout))
 
 	// Send the packet via broadcast
-	sendConn, err := net.DialUDP("udp4", &net.UDPAddr{Port: dhcpClientPort}, &net.UDPAddr{IP: net.ParseIP(broadcastAddr), Port: dhcpServerPort})
-	if err != nil {
-		return nil, fmt.Errorf("failed to dial UDP: %w", err)
-	}
-	defer sendConn.Close()
-
-	_, err = sendConn.Write(discover.ToBytes())
+	dest := &net.UDPAddr{IP: net.ParseIP(broadcastAddr), Port: dhcpServerPort}
+	_, err = conn.WriteTo(discover.ToBytes(), dest)
 	if err != nil {
 		return nil, fmt.Errorf("failed to send DISCOVER: %w", err)
 	}
 
 	// Read response
 	buf := make([]byte, 4096)
-	n, _, err := listenConn.ReadFromUDP(buf)
+	n, _, err := conn.ReadFromUDP(buf)
 	if err != nil {
 		return nil, fmt.Errorf("failed to receive OFFER: %w", err)
 	}
@@ -127,30 +121,25 @@ func sendDHCPRequest(clientMAC net.HardwareAddr, offerIP net.IP, serverIP net.IP
 	request.UpdateOption(dhcpv4.OptRequestedIPAddress(offerIP))
 	request.UpdateOption(dhcpv4.OptServerIdentifier(serverIP))
 
-	// Listen for ACK
-	listenConn, err := net.ListenUDP("udp4", &net.UDPAddr{Port: dhcpClientPort})
+	// Use a single socket for both sending and receiving on port 68
+	conn, err := net.ListenUDP("udp4", &net.UDPAddr{Port: dhcpClientPort})
 	if err != nil {
-		return nil, fmt.Errorf("failed to listen on UDP: %w", err)
+		return nil, fmt.Errorf("failed to listen on UDP port %d: %w", dhcpClientPort, err)
 	}
-	defer listenConn.Close()
+	defer conn.Close()
 
-	listenConn.SetReadDeadline(time.Now().Add(dhcpTimeout))
+	conn.SetReadDeadline(time.Now().Add(dhcpTimeout))
 
 	// Send via broadcast
-	sendConn, err := net.DialUDP("udp4", &net.UDPAddr{Port: dhcpClientPort}, &net.UDPAddr{IP: net.ParseIP(broadcastAddr), Port: dhcpServerPort})
-	if err != nil {
-		return nil, fmt.Errorf("failed to dial UDP: %w", err)
-	}
-	defer sendConn.Close()
-
-	_, err = sendConn.Write(request.ToBytes())
+	dest := &net.UDPAddr{IP: net.ParseIP(broadcastAddr), Port: dhcpServerPort}
+	_, err = conn.WriteTo(request.ToBytes(), dest)
 	if err != nil {
 		return nil, fmt.Errorf("failed to send REQUEST: %w", err)
 	}
 
 	// Read response
 	buf := make([]byte, 4096)
-	n, _, err := listenConn.ReadFromUDP(buf)
+	n, _, err := conn.ReadFromUDP(buf)
 	if err != nil {
 		return nil, fmt.Errorf("failed to receive ACK: %w", err)
 	}
