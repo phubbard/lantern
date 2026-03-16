@@ -84,13 +84,17 @@ type UpstreamConfig struct {
 	DOHURL          string   `json:"doh_url"`
 	FallbackServers []string `json:"fallback_servers"`
 	CacheMaxEntries int      `json:"cache_max_entries"`
+	CacheHotSetSize int      `json:"cache_hot_set_size"` // in-memory LRU capacity (default 5000)
 	CacheDB         string   `json:"cache_db"`
 }
 
-// BlocklistConfig represents a blocklist configuration
+// BlocklistConfig represents a blocklist configuration.
+// Either Path (local file) or URL (remote) must be set, not both.
 type BlocklistConfig struct {
-	Path    string `json:"path"`
-	Enabled bool   `json:"enabled"`
+	Path           string   `json:"path"`
+	URL            string   `json:"url"`
+	Enabled        bool     `json:"enabled"`
+	UpdateInterval Duration `json:"update_interval"`
 }
 
 // StaticHost represents a static host mapping
@@ -197,6 +201,9 @@ func (c *Config) SetDefaults() {
 	}
 	if c.Upstream.CacheMaxEntries == 0 {
 		c.Upstream.CacheMaxEntries = 50000
+	}
+	if c.Upstream.CacheHotSetSize == 0 {
+		c.Upstream.CacheHotSetSize = 5000
 	}
 	if c.Upstream.CacheDB == "" {
 		c.Upstream.CacheDB = "/var/lib/lantern/cache.db"
@@ -428,8 +435,8 @@ func (c *Config) validateUpstream() error {
 
 func (c *Config) validateBlocklists() error {
 	for i, bl := range c.Blocklists {
-		if bl.Path == "" {
-			return fmt.Errorf("blocklists[%d].path is required", i)
+		if bl.Path == "" && bl.URL == "" {
+			return fmt.Errorf("blocklists[%d] must have either path or url", i)
 		}
 	}
 	return nil

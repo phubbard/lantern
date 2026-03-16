@@ -10,16 +10,27 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-// Cache implements an SQLite-based LRU DNS cache.
+// Cache implements a two-tier DNS cache: a fast in-memory LRU for the hot
+// working set backed by a persistent SQLite store for the long tail.
 type Cache struct {
 	db         *sql.DB
+	mem        *memLRU   // hot tier: sub-microsecond lookups
 	mu         sync.Mutex // serialize writes
 	maxEntries int
+	closed     bool
 	logger     *slog.Logger
 }
 
-// New creates a new SQLite-backed DNS cache at the specified path.
-func New(dbPath string, maxEntries int, logger *slog.Logger) (*Cache, error) {
+// New creates a new two-tier DNS cache. hotSetSize controls the in-memory LRU
+// capacity (0 uses the default of 5000). maxEntries caps the SQLite store.
+func New(dbPath string, maxEntries int, logger *slog.Logger, hotSetSize ...int) (*Cache, error) {
+	hsz := maxEntries // default: match SQLite capacity
+	if hsz <= 0 || hsz > 5000 {
+		hsz = 5000
+	}
+	if len(hotSetSize) > 0 && hotSetSize[0] > 0 {
+		hsz = hotSetSize[0]
+	}
 	db, err := sql.Open("sqlite", dbPath)
 	if err != nil {
 		return nil, err
@@ -56,22 +67,44 @@ func New(dbPath string, maxEntries int, logger *slog.Logger) (*Cache, error) {
 		return nil, err
 	}
 
-	return &Cache{
+	c := &Cache{
 		db:         db,
+		mem:        newMemLRU(hsz),
 		maxEntries: maxEntries,
 		logger:     logger,
-	}, nil
+	}
+
+	// Pre-warm the in-memory tier from SQLite (most recently used entries)
+	c.prewarm(hsz)
+
+	return c, nil
 }
 
-// Get retrieves a cached DNS response if it exists and hasn't expired.
-// Returns the response bytes and true if found and valid, false otherwise.
+// Get retrieves a cached DNS response. It checks the in-memory hot tier
+// first (sub-microsecond), then falls back to SQLite, promoting hits to
+// the hot tier.
 func (c *Cache) Get(name string, qtype uint16) ([]byte, bool) {
+	if c.closed {
+		return nil, false
+	}
+
+	// Fast path: check in-memory LRU
+	if resp, ok := c.mem.get(name, qtype); ok {
+		// Keep SQLite last_used in sync so eviction stays consistent.
+		// This is a single UPDATE by primary key — fast enough to be synchronous.
+		c.mu.Lock()
+		nowMs := time.Now().UnixMilli()
+		_, _ = c.db.Exec(`UPDATE dns_cache SET last_used = ? WHERE query_name = ? AND query_type = ?`, nowMs, name, qtype)
+		c.mu.Unlock()
+		return resp, true
+	}
+
+	// Slow path: check SQLite
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
 	now := time.Now().Unix()
 
-	// Query the cache
 	var response []byte
 	var ttlSeconds int64
 	var cachedAt int64
@@ -89,33 +122,44 @@ func (c *Cache) Get(name string, qtype uint16) ([]byte, bool) {
 		return nil, false
 	}
 
-	// Check if expired (cached_at is in seconds)
+	// Check if expired
 	if now > cachedAt+ttlSeconds {
-		// Entry is expired, delete it
 		_, _ = c.db.Exec("DELETE FROM dns_cache WHERE query_name = ? AND query_type = ?", name, qtype)
 		return nil, false
 	}
 
-	// Update last_used timestamp (milliseconds for precise LRU ordering)
+	// Update last_used in SQLite
 	nowMs := time.Now().UnixMilli()
 	_, _ = c.db.Exec(`
 		UPDATE dns_cache SET last_used = ? WHERE query_name = ? AND query_type = ?
 	`, nowMs, name, qtype)
 
+	// Promote to in-memory hot tier
+	remainingTTL := int(ttlSeconds - (now - cachedAt))
+	if remainingTTL > 0 {
+		c.mem.put(name, qtype, response, remainingTTL)
+	}
+
 	return response, true
 }
 
-// Put stores or updates a DNS response in the cache with the given TTL.
-// If the cache exceeds maxEntries, it evicts the least recently used entries.
+// Put stores a DNS response in both the in-memory hot tier and SQLite.
+// Evicts least-recently-used entries from SQLite when capacity is exceeded.
 func (c *Cache) Put(name string, qtype uint16, response []byte, ttl int) {
+	if c.closed {
+		return
+	}
+
+	// Write-through to in-memory tier (fast, lock-free from caller's perspective)
+	c.mem.put(name, qtype, response, ttl)
+
+	// Persist to SQLite
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
 	now := time.Now().Unix()
 	nowMs := time.Now().UnixMilli()
 
-	// UPSERT: insert or replace
-	// cached_at is in seconds (for TTL expiry check), last_used is in milliseconds (for LRU ordering)
 	_, err := c.db.Exec(`
 		INSERT INTO dns_cache (query_name, query_type, response, ttl_seconds, cached_at, last_used)
 		VALUES (?, ?, ?, ?, ?, ?)
@@ -131,7 +175,6 @@ func (c *Cache) Put(name string, qtype uint16, response []byte, ttl int) {
 		return
 	}
 
-	// Check if we exceeded maxEntries and evict LRU entries if needed
 	c.evictIfNeeded()
 }
 
@@ -247,7 +290,53 @@ func (c *Cache) StartPruner(ctx context.Context, interval time.Duration) {
 	}()
 }
 
-// Close closes the database connection.
+// prewarm loads the most recently used entries from SQLite into the in-memory
+// tier at startup so the hot path is ready immediately.
+func (c *Cache) prewarm(limit int) {
+	now := time.Now().Unix()
+
+	rows, err := c.db.Query(`
+		SELECT query_name, query_type, response, ttl_seconds, cached_at
+		FROM dns_cache
+		WHERE ? <= cached_at + ttl_seconds
+		ORDER BY last_used DESC
+		LIMIT ?
+	`, now, limit)
+	if err != nil {
+		c.logger.Warn("cache prewarm query failed", "err", err)
+		return
+	}
+	defer rows.Close()
+
+	count := 0
+	for rows.Next() {
+		var name string
+		var qtype int
+		var response []byte
+		var ttlSeconds, cachedAt int64
+		if err := rows.Scan(&name, &qtype, &response, &ttlSeconds, &cachedAt); err != nil {
+			continue
+		}
+		remaining := int(ttlSeconds - (now - cachedAt))
+		if remaining > 0 {
+			c.mem.put(name, uint16(qtype), response, remaining)
+			count++
+		}
+	}
+
+	if count > 0 {
+		c.logger.Info("cache prewarmed from SQLite", "entries", count)
+	}
+}
+
+// MemSize returns the number of entries in the in-memory hot tier.
+func (c *Cache) MemSize() int {
+	return c.mem.size()
+}
+
+// Close closes the database connection and clears the in-memory tier.
 func (c *Cache) Close() error {
+	c.closed = true
+	c.mem.clear()
 	return c.db.Close()
 }

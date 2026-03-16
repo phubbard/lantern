@@ -19,24 +19,26 @@ import (
 
 // Server is the HTTP server for the Lantern dashboard.
 type Server struct {
-	cfg     *config.Config
-	pool    *model.LeasePool
-	metrics *metrics.Collector
-	events  *events.Store
-	blocker *blocker.Blocker
-	httpSrv *http.Server
-	logger  *slog.Logger
+	cfg          *config.Config
+	pool         *model.LeasePool
+	metrics      *metrics.Collector
+	events       *events.Store
+	blocker      *blocker.Blocker
+	subscriptions *blocker.SubscriptionManager
+	httpSrv      *http.Server
+	logger       *slog.Logger
 }
 
 // New creates a new Server instance.
-func New(cfg *config.Config, pool *model.LeasePool, m *metrics.Collector, e *events.Store, b *blocker.Blocker, logger *slog.Logger) *Server {
+func New(cfg *config.Config, pool *model.LeasePool, m *metrics.Collector, e *events.Store, b *blocker.Blocker, subMgr *blocker.SubscriptionManager, logger *slog.Logger) *Server {
 	s := &Server{
-		cfg:     cfg,
-		pool:    pool,
-		metrics: m,
-		events:  e,
-		blocker: b,
-		logger:  logger,
+		cfg:           cfg,
+		pool:          pool,
+		metrics:       m,
+		events:        e,
+		blocker:       b,
+		subscriptions: subMgr,
+		logger:        logger,
 	}
 
 	mux := http.NewServeMux()
@@ -59,6 +61,11 @@ func New(cfg *config.Config, pool *model.LeasePool, m *metrics.Collector, e *eve
 	mux.HandleFunc("GET /api/metrics", s.handleAPIMetrics)
 	mux.HandleFunc("GET /api/leases", s.handleAPILeases)
 	mux.HandleFunc("GET /api/events/stream", s.handleEventStream)
+	mux.HandleFunc("GET /api/blocker/status", s.handleBlockerStatus)
+	mux.HandleFunc("POST /api/blocker/pause", s.handleBlockerPause)
+	mux.HandleFunc("POST /api/blocker/resume", s.handleBlockerResume)
+	mux.HandleFunc("GET /api/subscriptions", s.handleSubscriptionStatus)
+	mux.HandleFunc("POST /api/subscriptions/update", s.handleSubscriptionUpdate)
 	mux.HandleFunc("POST /api/reload", s.handleReload)
 	mux.HandleFunc("POST /api/static", s.handleAddStatic)
 	mux.HandleFunc("DELETE /api/static/{mac}", s.handleDeleteStatic)
@@ -222,6 +229,66 @@ func (s *Server) handleEventStream(w http.ResponseWriter, r *http.Request) {
 			flusher.Flush()
 		}
 	}
+}
+
+// handleBlockerStatus returns the current blocker state.
+func (s *Server) handleBlockerStatus(w http.ResponseWriter, r *http.Request) {
+	paused, remaining := s.blocker.IsPaused()
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"paused":           paused,
+		"remaining_seconds": int(remaining.Seconds()),
+		"blocked_domains":  s.blocker.Count(),
+	})
+}
+
+// handleBlockerPause pauses blocking for a given number of minutes.
+func (s *Server) handleBlockerPause(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Minutes int `json:"minutes"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request", http.StatusBadRequest)
+		return
+	}
+	if req.Minutes < 1 || req.Minutes > 60 {
+		http.Error(w, "minutes must be between 1 and 60", http.StatusBadRequest)
+		return
+	}
+	s.blocker.Pause(time.Duration(req.Minutes) * time.Minute)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"status":  "paused",
+		"minutes": req.Minutes,
+	})
+}
+
+// handleBlockerResume resumes blocking immediately.
+func (s *Server) handleBlockerResume(w http.ResponseWriter, r *http.Request) {
+	s.blocker.Resume()
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"status": "resumed"})
+}
+
+// handleSubscriptionStatus returns the current subscription states.
+func (s *Server) handleSubscriptionStatus(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if s.subscriptions == nil {
+		json.NewEncoder(w).Encode([]struct{}{})
+		return
+	}
+	json.NewEncoder(w).Encode(s.subscriptions.Status())
+}
+
+// handleSubscriptionUpdate triggers an immediate refresh of all subscriptions.
+func (s *Server) handleSubscriptionUpdate(w http.ResponseWriter, r *http.Request) {
+	if s.subscriptions == nil {
+		http.Error(w, "subscriptions not configured", http.StatusNotFound)
+		return
+	}
+	s.subscriptions.UpdateNow()
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"status": "updated"})
 }
 
 // handleReload triggers a configuration reload.
@@ -465,6 +532,20 @@ func dashboardContent() *template.Template {
     </div>
 </div>
 
+<div class="card" id="blocker-card">
+    <h2>Ad Blocking</h2>
+    <div style="display: flex; align-items: center; gap: 1rem; flex-wrap: wrap;">
+        <span id="blocker-status" style="font-weight: 600;"></span>
+        <span id="blocker-countdown" style="color: #f59e0b;"></span>
+        <div style="display: flex; gap: 0.5rem;">
+            <button class="btn btn-small" onclick="pauseBlocking(1)">Pause 1m</button>
+            <button class="btn btn-small" onclick="pauseBlocking(5)">Pause 5m</button>
+            <button class="btn btn-small" onclick="pauseBlocking(10)">Pause 10m</button>
+            <button class="btn btn-small" id="resume-btn" onclick="resumeBlocking()" style="display:none; background-color:#22c55e;">Resume</button>
+        </div>
+    </div>
+</div>
+
 <div class="card">
     <h2>Query Rate (24h)</h2>
     <canvas id="queryChart" style="height: 300px;"></canvas>
@@ -489,8 +570,44 @@ func dashboardContent() *template.Template {
 </div>
 
 <script>
-    // Placeholder for Chart.js initialization
-    // Charts would be populated via /api/metrics endpoint
+    async function pauseBlocking(minutes) {
+        await fetch('/api/blocker/pause', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({minutes: minutes})
+        });
+        updateBlockerStatus();
+    }
+
+    async function resumeBlocking() {
+        await fetch('/api/blocker/resume', {method: 'POST'});
+        updateBlockerStatus();
+    }
+
+    async function updateBlockerStatus() {
+        const resp = await fetch('/api/blocker/status');
+        const data = await resp.json();
+        const status = document.getElementById('blocker-status');
+        const countdown = document.getElementById('blocker-countdown');
+        const resumeBtn = document.getElementById('resume-btn');
+
+        if (data.paused) {
+            const mins = Math.floor(data.remaining_seconds / 60);
+            const secs = data.remaining_seconds % 60;
+            status.textContent = 'PAUSED';
+            status.style.color = '#f59e0b';
+            countdown.textContent = mins + 'm ' + secs + 's remaining';
+            resumeBtn.style.display = 'inline-block';
+        } else {
+            status.textContent = 'ACTIVE — ' + data.blocked_domains.toLocaleString() + ' domains blocked';
+            status.style.color = '#22c55e';
+            countdown.textContent = '';
+            resumeBtn.style.display = 'none';
+        }
+    }
+
+    updateBlockerStatus();
+    setInterval(updateBlockerStatus, 5000);
 </script>
 {{end}}`
 

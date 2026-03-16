@@ -7,13 +7,15 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"time"
 )
 
 type Blocker struct {
-	mu      sync.RWMutex
-	domains map[string]bool // blocked domains
-	lists   []BlocklistInfo
-	logger  *slog.Logger
+	mu          sync.RWMutex
+	domains     map[string]bool // blocked domains
+	lists       []BlocklistInfo
+	pausedUntil time.Time // zero value means not paused
+	logger      *slog.Logger
 }
 
 type BlocklistInfo struct {
@@ -133,7 +135,41 @@ func (b *Blocker) LoadFiles(configs []struct {
 	return nil
 }
 
+// Pause temporarily disables blocking for the given duration.
+func (b *Blocker) Pause(d time.Duration) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	b.pausedUntil = time.Now().Add(d)
+	b.logger.Info("blocking paused", "duration", d, "until", b.pausedUntil.Format(time.RFC3339))
+}
+
+// Resume re-enables blocking immediately.
+func (b *Blocker) Resume() {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	b.pausedUntil = time.Time{}
+	b.logger.Info("blocking resumed")
+}
+
+// IsPaused returns true if blocking is currently paused, along with the remaining duration.
+func (b *Blocker) IsPaused() (bool, time.Duration) {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+
+	if b.pausedUntil.IsZero() {
+		return false, 0
+	}
+	remaining := time.Until(b.pausedUntil)
+	if remaining <= 0 {
+		return false, 0
+	}
+	return true, remaining
+}
+
 // IsBlocked checks if a domain is blocked.
+// Returns false if blocking is paused.
 // Normalizes input: lowercase, strips trailing dot.
 // Thread-safe read lock.
 func (b *Blocker) IsBlocked(name string) bool {
@@ -143,6 +179,11 @@ func (b *Blocker) IsBlocked(name string) bool {
 
 	b.mu.RLock()
 	defer b.mu.RUnlock()
+
+	// Check if blocking is paused
+	if !b.pausedUntil.IsZero() && time.Now().Before(b.pausedUntil) {
+		return false
+	}
 
 	return b.domains[name]
 }

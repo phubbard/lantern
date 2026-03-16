@@ -57,7 +57,7 @@ jobs:
         run: go mod download
 
       - name: Run unit tests
-        run: go test -race -v ./internal/... ./pkg/model/... ./pkg/blocker/... ./pkg/config/...
+        run: go test -race -v ./internal/... ./pkg/model/... ./pkg/blocker/... ./pkg/config/... ./pkg/unifi/...
 
   # ─── Protocol Tests ────────────────────────────────
   test-protocol:

@@ -245,9 +245,9 @@ func extractMinTTL(msg *dns.Msg) uint32 {
 		minTTL = 1
 	}
 
-	// Cap maximum cache TTL at 1 hour to avoid stale data
-	if minTTL > 3600 {
-		minTTL = 3600
+	// Cap at 24 hours; the two-tier cache handles eviction naturally
+	if minTTL > 86400 {
+		minTTL = 86400
 	}
 
 	return minTTL

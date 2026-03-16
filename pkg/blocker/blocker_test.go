@@ -6,6 +6,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 // Helper to create a test logger
@@ -568,5 +569,68 @@ func TestLoadFiles(t *testing.T) {
 
 	if blocker.IsBlocked("disabled.com") {
 		t.Error("Disabled file was loaded (should not be)")
+	}
+}
+
+func TestPause(t *testing.T) {
+	b := New(nil)
+	b.Add("test.com")
+
+	// Should be blocked by default
+	if !b.IsBlocked("test.com") {
+		t.Error("expected test.com to be blocked")
+	}
+
+	// Pause for 100ms
+	b.Pause(100 * time.Millisecond)
+
+	paused, remaining := b.IsPaused()
+	if !paused {
+		t.Error("expected blocker to be paused")
+	}
+	if remaining <= 0 {
+		t.Error("expected positive remaining duration")
+	}
+
+	// Should NOT be blocked while paused
+	if b.IsBlocked("test.com") {
+		t.Error("expected test.com to NOT be blocked while paused")
+	}
+
+	// Wait for pause to expire
+	time.Sleep(150 * time.Millisecond)
+
+	paused, _ = b.IsPaused()
+	if paused {
+		t.Error("expected blocker to no longer be paused")
+	}
+
+	// Should be blocked again
+	if !b.IsBlocked("test.com") {
+		t.Error("expected test.com to be blocked after pause expires")
+	}
+}
+
+func TestResume(t *testing.T) {
+	b := New(nil)
+	b.Add("test.com")
+
+	// Pause for a long time
+	b.Pause(1 * time.Hour)
+
+	if b.IsBlocked("test.com") {
+		t.Error("expected test.com to NOT be blocked while paused")
+	}
+
+	// Resume immediately
+	b.Resume()
+
+	paused, _ := b.IsPaused()
+	if paused {
+		t.Error("expected blocker to not be paused after resume")
+	}
+
+	if !b.IsBlocked("test.com") {
+		t.Error("expected test.com to be blocked after resume")
 	}
 }

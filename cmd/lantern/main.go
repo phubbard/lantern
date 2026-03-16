@@ -21,6 +21,7 @@ import (
 	"github.com/phubbard/lantern/pkg/events"
 	"github.com/phubbard/lantern/pkg/metrics"
 	"github.com/phubbard/lantern/pkg/model"
+	"github.com/phubbard/lantern/pkg/unifi"
 	"github.com/phubbard/lantern/pkg/upstream"
 	"github.com/phubbard/lantern/pkg/web"
 	"github.com/spf13/cobra"
@@ -99,6 +100,20 @@ func main() {
 	staticCmd.AddCommand(staticRemoveCmd)
 
 	rootCmd.AddCommand(staticCmd)
+
+	// Import UniFi command
+	var unifiOutputPath string
+	importUnifiCmd := &cobra.Command{
+		Use:   "import-unifi <backup.json>",
+		Short: "Import static hosts and network settings from a UniFi config backup",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runImportUnifi(args[0], unifiOutputPath)
+		},
+	}
+	importUnifiCmd.Flags().StringVarP(&unifiOutputPath, "output", "o", "",
+		"Write Lantern config fragment to file (default: stdout)")
+	rootCmd.AddCommand(importUnifiCmd)
 
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
@@ -197,7 +212,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 	if err := os.MkdirAll(cacheDir, 0700); err != nil {
 		logger.Warn("failed to create cache directory", "dir", cacheDir, "error", err)
 	}
-	dnsCache, err := cache.New(cfg.Upstream.CacheDB, cfg.Upstream.CacheMaxEntries, logger)
+	dnsCache, err := cache.New(cfg.Upstream.CacheDB, cfg.Upstream.CacheMaxEntries, logger, cfg.Upstream.CacheHotSetSize)
 	if err != nil {
 		return fmt.Errorf("failed to create cache: %w", err)
 	}
@@ -222,6 +237,23 @@ func runServe(cmd *cobra.Command, args []string) error {
 			logger.Info("loaded blocklist", "file", bl.Path, "count", count)
 		}
 	}
+
+	// 10b. Set up blocklist subscriptions for URL-based lists
+	subCacheDir := filepath.Join(filepath.Dir(cfg.Upstream.CacheDB), "blocklists")
+	subMgr := blocker.NewSubscriptionManager(blockMgr, subCacheDir, logger)
+	for _, bl := range cfg.Blocklists {
+		if !bl.Enabled || bl.URL == "" {
+			continue
+		}
+		interval := time.Duration(bl.UpdateInterval)
+		if interval == 0 {
+			interval = 24 * time.Hour
+		}
+		if err := subMgr.Add(bl.URL, interval); err != nil {
+			logger.Warn("failed to add blocklist subscription", "url", bl.URL, "error", err)
+		}
+	}
+	subMgr.Start(ctx)
 
 	// 11. Create DNS server with upstream and blocker
 	dnsServer := lanterndns.New(cfg, upstreamResolver, blockMgr, metricsCollector, eventsStore)
@@ -251,7 +283,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 	// 13. Create web server if enabled
 	var webServer *web.Server
 	if cfg.Web.Enabled {
-		webServer = web.New(cfg, leasePool, metricsCollector, eventsStore, blockMgr, logger)
+		webServer = web.New(cfg, leasePool, metricsCollector, eventsStore, blockMgr, subMgr, logger)
 	}
 
 	// 14. Create control server, register RPC handlers
@@ -269,7 +301,9 @@ func runServe(cmd *cobra.Command, args []string) error {
 			"queries_upstream": snap.QueriesUpstream,
 			"cache_total":      total,
 			"cache_expired":    expired,
+			"cache_mem":        dnsCache.MemSize(),
 			"blocked_domains":  blockMgr.Count(),
+			"subscriptions":    subMgr.Status(),
 		}, nil
 	})
 
@@ -434,6 +468,9 @@ shutdown:
 	logger.Info("shutting down servers")
 	cancel() // Signal all goroutines to stop
 
+	// Stop subscription manager
+	subMgr.Stop()
+
 	// Stop servers
 	if err := dnsServer.Stop(); err != nil {
 		logger.Error("DNS server stop error", "error", err)
@@ -595,5 +632,40 @@ func runStaticRemove(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Printf("Static reservation removed: %s\n", mac)
+	return nil
+}
+
+// runImportUnifi imports a UniFi config backup and outputs Lantern config
+func runImportUnifi(inputPath, outputPath string) error {
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+
+	result, err := unifi.ImportFromFile(inputPath, logger)
+	if err != nil {
+		return fmt.Errorf("import failed: %w", err)
+	}
+
+	// Print warnings
+	for _, w := range result.Warnings {
+		fmt.Fprintf(os.Stderr, "WARNING: %s\n", w)
+	}
+
+	// Generate Lantern config fragment
+	data, err := result.ToLanternConfig()
+	if err != nil {
+		return fmt.Errorf("failed to generate config: %w", err)
+	}
+
+	fmt.Fprintf(os.Stderr, "Imported %d static hosts, %d networks\n",
+		len(result.StaticHosts), len(result.Networks))
+
+	if outputPath != "" {
+		if err := os.WriteFile(outputPath, data, 0600); err != nil {
+			return fmt.Errorf("failed to write output: %w", err)
+		}
+		fmt.Fprintf(os.Stderr, "Config written to %s\n", outputPath)
+	} else {
+		fmt.Println(string(data))
+	}
+
 	return nil
 }
