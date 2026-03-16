@@ -27,7 +27,7 @@ services:
       - ./test/integration/config.test.json:/etc/lantern/config.json:ro
     command: ["serve", "-c", "/etc/lantern/config.json"]
     healthcheck:
-      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:8080/"]
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:8080/health"]
       interval: 2s
       timeout: 3s
       retries: 15

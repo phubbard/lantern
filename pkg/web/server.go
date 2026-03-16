@@ -49,6 +49,12 @@ func New(cfg *config.Config, pool *model.LeasePool, m *metrics.Collector, e *eve
 	mux.HandleFunc("GET /blocklist", s.handleBlocklist)
 	mux.HandleFunc("GET /metrics", s.handleMetricsPage)
 
+	// Health check
+	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"status":"ok"}`))
+	})
+
 	// API routes
 	mux.HandleFunc("GET /api/metrics", s.handleAPIMetrics)
 	mux.HandleFunc("GET /api/leases", s.handleAPILeases)

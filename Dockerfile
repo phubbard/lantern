@@ -37,6 +37,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libpcap0.8 \
     ca-certificates \
     tzdata \
+    wget \
     && rm -rf /var/lib/apt/lists/*
 
 # Create lantern user and group
