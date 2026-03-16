@@ -9,10 +9,10 @@ import (
 	"time"
 
 	"github.com/miekg/dns"
-	"github.com/pfh/lantern/pkg/config"
-	"github.com/pfh/lantern/pkg/events"
-	"github.com/pfh/lantern/pkg/metrics"
-	"github.com/pfh/lantern/pkg/model"
+	"github.com/phubbard/lantern/pkg/config"
+	"github.com/phubbard/lantern/pkg/events"
+	"github.com/phubbard/lantern/pkg/metrics"
+	"github.com/phubbard/lantern/pkg/model"
 )
 
 // Zone holds the local DNS zone data

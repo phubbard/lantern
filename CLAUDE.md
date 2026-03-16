@@ -7,7 +7,7 @@ This guide is for AI coding assistants (Claude, Copilot, etc.) working on the La
 **Lantern** is a single-binary, self-hosted DNS+DHCP server for home networks.
 
 - **Language**: Go 1.22+
-- **Module**: `github.com/pfh/lantern`
+- **Module**: `github.com/phubbard/lantern`
 - **Target platforms**: Linux, macOS
 - **Design goals**: Lightweight (minimal deps, pure Go), stateless (state reloads from disk), production-ready (graceful shutdown, comprehensive logging)
 - **Typical deployment**: Raspberry Pi, NUC, Docker, or small Linux VM as home gateway

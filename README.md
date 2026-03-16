@@ -27,7 +27,7 @@ Pre-built binaries are available for Linux and macOS (amd64, arm64):
 
 ```bash
 # Check the releases page
-wget https://github.com/pfh/lantern/releases/download/v0.1.0/lantern-linux-amd64
+wget https://github.com/phubbard/lantern/releases/download/v0.1.0/lantern-linux-amd64
 chmod +x lantern-linux-amd64
 ./lantern-linux-amd64 serve -c /etc/lantern/config.json
 ```
@@ -48,7 +48,7 @@ brew install go libpcap
 
 Build:
 ```bash
-git clone https://github.com/pfh/lantern.git
+git clone https://github.com/phubbard/lantern.git
 cd lantern
 make deps
 make build
@@ -65,7 +65,7 @@ docker run -d --net host \
   -v /var/lib/lantern:/var/lib/lantern \
   --cap-add=NET_BIND_SERVICE \
   --cap-add=NET_RAW \
-  pfh/lantern:latest serve -c /etc/lantern/config.json
+  phubbard/lantern:latest serve -c /etc/lantern/config.json
 ```
 
 Or with docker-compose (`docker-compose.yml`):
@@ -73,7 +73,7 @@ Or with docker-compose (`docker-compose.yml`):
 version: '3.8'
 services:
   lantern:
-    image: pfh/lantern:latest
+    image: phubbard/lantern:latest
     network_mode: host
     cap_add:
       - NET_BIND_SERVICE
@@ -412,7 +412,7 @@ sudo journalctl -u lantern -f
 
 ### launchd Service (macOS)
 
-Create `~/Library/LaunchAgents/com.pfh.lantern.plist`:
+Create `~/Library/LaunchAgents/com.phubbard.lantern.plist`:
 
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
@@ -420,7 +420,7 @@ Create `~/Library/LaunchAgents/com.pfh.lantern.plist`:
 <plist version="1.0">
 <dict>
     <key>Label</key>
-    <string>com.pfh.lantern</string>
+    <string>com.phubbard.lantern</string>
     <key>ProgramArguments</key>
     <array>
         <string>/usr/local/bin/lantern</string>
@@ -444,8 +444,8 @@ Load and start:
 ```bash
 mkdir -p /usr/local/etc/lantern
 # Copy config.json to /usr/local/etc/lantern/
-launchctl load ~/Library/LaunchAgents/com.pfh.lantern.plist
-launchctl start com.pfh.lantern
+launchctl load ~/Library/LaunchAgents/com.phubbard.lantern.plist
+launchctl start com.phubbard.lantern
 launchctl list | grep lantern
 tail -f /var/log/lantern.log
 ```
@@ -455,9 +455,9 @@ tail -f /var/log/lantern.log
 See "Quick Start > Docker" above. The official image includes Go runtime and libpcap.
 
 ```bash
-docker build -t pfh/lantern:latest .
+docker build -t phubbard/lantern:latest .
 docker run --rm -it --net host -v $(pwd)/config.json:/etc/lantern/config.json \
-  pfh/lantern:latest serve -c /etc/lantern/config.json
+  phubbard/lantern:latest serve -c /etc/lantern/config.json
 ```
 
 ## Development

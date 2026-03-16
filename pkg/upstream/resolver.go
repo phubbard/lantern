@@ -11,9 +11,9 @@ import (
 	"time"
 
 	"github.com/miekg/dns"
-	"github.com/pfh/lantern/pkg/cache"
-	"github.com/pfh/lantern/pkg/config"
-	"github.com/pfh/lantern/pkg/metrics"
+	"github.com/phubbard/lantern/pkg/cache"
+	"github.com/phubbard/lantern/pkg/config"
+	"github.com/phubbard/lantern/pkg/metrics"
 )
 
 // Resolver handles DNS resolution with caching, DoH, and fallback support.

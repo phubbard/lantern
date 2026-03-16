@@ -12,10 +12,10 @@ import (
 
 	"github.com/insomniacslk/dhcp/dhcpv4"
 	"github.com/insomniacslk/dhcp/dhcpv4/server4"
-	"github.com/pfh/lantern/pkg/config"
-	"github.com/pfh/lantern/pkg/events"
-	"github.com/pfh/lantern/pkg/metrics"
-	"github.com/pfh/lantern/pkg/model"
+	"github.com/phubbard/lantern/pkg/config"
+	"github.com/phubbard/lantern/pkg/events"
+	"github.com/phubbard/lantern/pkg/metrics"
+	"github.com/phubbard/lantern/pkg/model"
 )
 
 // Server implements a DHCPv4 server for home DNS.

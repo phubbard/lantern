@@ -1,4 +1,4 @@
-module github.com/pfh/lantern
+module github.com/phubbard/lantern
 
 go 1.22
 

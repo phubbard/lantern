@@ -3,7 +3,7 @@ package events
 import (
 	"sync"
 
-	"github.com/pfh/lantern/pkg/model"
+	"github.com/phubbard/lantern/pkg/model"
 )
 
 // RingBuffer is a fixed-size circular buffer for HostEvents.

@@ -77,8 +77,8 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
 # OCI image labels
 LABEL org.opencontainers.image.title="lantern" \
       org.opencontainers.image.description="DHCP and DNS server for home networks" \
-      org.opencontainers.image.url="https://github.com/pfh/lantern" \
-      org.opencontainers.image.source="https://github.com/pfh/lantern" \
+      org.opencontainers.image.url="https://github.com/phubbard/lantern" \
+      org.opencontainers.image.source="https://github.com/phubbard/lantern" \
       org.opencontainers.image.vendor="lantern" \
       org.opencontainers.image.version="${VERSION}" \
       org.opencontainers.image.created="${BUILD_DATE}" \

@@ -9,11 +9,11 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/pfh/lantern/pkg/blocker"
-	"github.com/pfh/lantern/pkg/config"
-	"github.com/pfh/lantern/pkg/events"
-	"github.com/pfh/lantern/pkg/metrics"
-	"github.com/pfh/lantern/pkg/model"
+	"github.com/phubbard/lantern/pkg/blocker"
+	"github.com/phubbard/lantern/pkg/config"
+	"github.com/phubbard/lantern/pkg/events"
+	"github.com/phubbard/lantern/pkg/metrics"
+	"github.com/phubbard/lantern/pkg/model"
 )
 
 // Server is the HTTP server for the Lantern dashboard.

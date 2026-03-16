@@ -9,8 +9,8 @@ import (
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 	"github.com/google/gopacket/pcap"
-	"github.com/pfh/lantern/pkg/events"
-	"github.com/pfh/lantern/pkg/model"
+	"github.com/phubbard/lantern/pkg/events"
+	"github.com/phubbard/lantern/pkg/model"
 )
 
 // TCPSignature represents the fields extracted from a TCP SYN packet
