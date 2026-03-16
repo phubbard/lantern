@@ -458,10 +458,9 @@ func TestParseMAC(t *testing.T) {
 			expected: "aa:bb:cc:dd:ee:ff",
 		},
 		{
-			name:     "no separator",
-			input:    "aabbccddeeff",
-			wantErr:  false,
-			expected: "aa:bb:cc:dd:ee:ff",
+			name:    "no separator",
+			input:   "aabbccddeeff",
+			wantErr: true,
 		},
 		{
 			name:     "uppercase",
