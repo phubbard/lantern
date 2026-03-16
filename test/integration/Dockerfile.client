@@ -2,7 +2,7 @@ FROM debian:bookworm-slim
 RUN apt-get update && apt-get install -y --no-install-recommends \
     dnsutils curl jq netcat-openbsd iputils-ping ca-certificates \
     && rm -rf /var/lib/apt/lists/*
-COPY test/integration/run_tests.sh /tests/run_tests.sh
-COPY test/integration/blocklist.test.txt /tests/blocklist.test.txt
+COPY run_tests.sh /tests/run_tests.sh
+COPY blocklist.test.txt /tests/blocklist.test.txt
 RUN chmod +x /tests/run_tests.sh
 ENTRYPOINT ["/bin/bash"]

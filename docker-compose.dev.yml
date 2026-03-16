@@ -1,0 +1,52 @@
+# Development / local testing compose file
+# Uses an isolated bridge network — safe to run alongside your real LAN DHCP.
+#
+# Usage:
+#   docker compose -f docker-compose.dev.yml up --build
+#
+# Then open http://localhost:8080 for the web dashboard.
+# DNS is available at localhost:5053 (mapped from container port 53).
+#
+# To test DNS:
+#   dig @127.0.0.1 -p 5053 example.com
+#   dig @127.0.0.1 -p 5053 testbox.test.lantern
+
+services:
+  lantern:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: lantern-dev
+    networks:
+      devnet:
+        ipv4_address: 172.31.0.2
+    ports:
+      - "8080:8080"    # Web dashboard
+      - "5053:53/udp"  # DNS (remapped to avoid needing root)
+      - "5053:53/tcp"
+    cap_add:
+      - NET_BIND_SERVICE
+      - NET_RAW
+      - NET_ADMIN
+    volumes:
+      - ./configs/dev.json:/etc/lantern/config.json:ro
+      - lantern-dev-data:/var/lib/lantern
+    command: ["serve", "--config", "/etc/lantern/config.json"]
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:8080/"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+
+networks:
+  devnet:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.31.0.0/24
+          gateway: 172.31.0.1
+
+volumes:
+  lantern-dev-data:
+    driver: local

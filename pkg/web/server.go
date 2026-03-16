@@ -93,7 +93,7 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 		dashboardContent(),
 	)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := page.Execute(w, nil); err != nil {
+	if err := page.ExecuteTemplate(w, "base", nil); err != nil {
 		s.logger.Error("template error", "err", err)
 	}
 }
@@ -106,7 +106,7 @@ func (s *Server) handleLeases(w http.ResponseWriter, r *http.Request) {
 		leasesContent(),
 	)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := page.Execute(w, map[string]interface{}{
+	if err := page.ExecuteTemplate(w, "base", map[string]interface{}{
 		"Leases": leases,
 	}); err != nil {
 		s.logger.Error("template error", "err", err)
@@ -131,7 +131,7 @@ func (s *Server) handleLeaseDetail(w http.ResponseWriter, r *http.Request) {
 		leaseDetailContent(),
 	)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := page.Execute(w, lease); err != nil {
+	if err := page.ExecuteTemplate(w, "base", lease); err != nil {
 		s.logger.Error("template error", "err", err)
 	}
 }
@@ -143,7 +143,7 @@ func (s *Server) handleDNS(w http.ResponseWriter, r *http.Request) {
 		dnsContent(),
 	)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := page.Execute(w, nil); err != nil {
+	if err := page.ExecuteTemplate(w, "base", nil); err != nil {
 		s.logger.Error("template error", "err", err)
 	}
 }
@@ -155,7 +155,7 @@ func (s *Server) handleBlocklist(w http.ResponseWriter, r *http.Request) {
 		blocklistContent(),
 	)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := page.Execute(w, nil); err != nil {
+	if err := page.ExecuteTemplate(w, "base", nil); err != nil {
 		s.logger.Error("template error", "err", err)
 	}
 }
@@ -167,7 +167,7 @@ func (s *Server) handleMetricsPage(w http.ResponseWriter, r *http.Request) {
 		metricsContent(),
 	)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := page.Execute(w, nil); err != nil {
+	if err := page.ExecuteTemplate(w, "base", nil); err != nil {
 		s.logger.Error("template error", "err", err)
 	}
 }
@@ -423,7 +423,13 @@ func baseLayout(title string, content *template.Template) *template.Template {
 		panic(err)
 	}
 
-	base, err = base.AddParseTree("content", content.Tree)
+	// The content template uses {{define "content"}}...{{end}}, so
+	// we need to look up the defined "content" template, not the outer one.
+	ct := content.Lookup("content")
+	if ct == nil {
+		panic("content template must define a {{define \"content\"}} block")
+	}
+	base, err = base.AddParseTree("content", ct.Tree)
 	if err != nil {
 		panic(err)
 	}
