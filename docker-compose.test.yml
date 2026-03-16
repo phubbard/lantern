@@ -75,4 +75,4 @@ networks:
       config:
         - subnet: 172.30.0.0/24
           gateway: 172.30.0.1
-          ip_range: 172.30.0.2/28  # Docker IPAM only uses .2-.15
+          ip_range: 172.30.0.0/28  # Docker IPAM only uses .0-.15
