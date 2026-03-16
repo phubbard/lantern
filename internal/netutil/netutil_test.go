@@ -440,9 +440,9 @@ func TestFormatLastOctet(t *testing.T) {
 // Test ParseMAC
 func TestParseMAC(t *testing.T) {
 	tests := []struct {
-		name    string
-		input   string
-		wantErr bool
+		name     string
+		input    string
+		wantErr  bool
 		expected string
 	}{
 		{
@@ -469,19 +469,19 @@ func TestParseMAC(t *testing.T) {
 			expected: "aa:bb:cc:dd:ee:ff",
 		},
 		{
-			name:     "invalid format",
-			input:    "invalid",
-			wantErr:  true,
+			name:    "invalid format",
+			input:   "invalid",
+			wantErr: true,
 		},
 		{
-			name:     "incomplete",
-			input:    "aa:bb:cc:dd",
-			wantErr:  true,
+			name:    "incomplete",
+			input:   "aa:bb:cc:dd",
+			wantErr: true,
 		},
 		{
-			name:     "empty string",
-			input:    "",
-			wantErr:  true,
+			name:    "empty string",
+			input:   "",
+			wantErr: true,
 		},
 	}
 

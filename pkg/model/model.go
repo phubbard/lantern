@@ -43,13 +43,13 @@ type HostFingerprint struct {
 type Lease struct {
 	MAC         net.HardwareAddr `json:"mac"`
 	IP          net.IP           `json:"ip"`
-	Hostname    string           `json:"hostname"`      // from DHCP option 12/81
-	DNSName     string           `json:"dns_name"`      // computed full DNS name
+	Hostname    string           `json:"hostname"` // from DHCP option 12/81
+	DNSName     string           `json:"dns_name"` // computed full DNS name
 	Static      bool             `json:"static"`
 	TTL         time.Duration    `json:"ttl"`
 	GrantedAt   time.Time        `json:"granted_at"`
 	ExpiresAt   time.Time        `json:"expires_at"`
-	ClientID    string           `json:"client_id"`     // DHCP option 61
+	ClientID    string           `json:"client_id"` // DHCP option 61
 	Fingerprint *HostFingerprint `json:"fingerprint,omitempty"`
 }
 
@@ -174,7 +174,7 @@ type DNSQueryLog struct {
 	QueryName  string        `json:"query_name"`
 	QueryType  string        `json:"query_type"` // "A", "AAAA", "PTR", etc.
 	ResponseIP string        `json:"response_ip,omitempty"`
-	Source     string        `json:"source"`     // "local", "cache", "upstream", "blocked"
+	Source     string        `json:"source"` // "local", "cache", "upstream", "blocked"
 	Latency    time.Duration `json:"latency_ns"`
 	Blocked    bool          `json:"blocked"`
 }
@@ -189,8 +189,8 @@ type LeasePool struct {
 	DefaultTTL time.Duration
 	StaticTTL  time.Duration
 	leases     map[string]*Lease // key: MAC string
-	byIP       map[string]*Lease  // key: IP string
-	byName     map[string]*Lease  // key: DNS name
+	byIP       map[string]*Lease // key: IP string
+	byName     map[string]*Lease // key: DNS name
 }
 
 // NewLeasePool creates a new LeasePool

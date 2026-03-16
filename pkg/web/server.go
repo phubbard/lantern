@@ -256,7 +256,7 @@ func baseLayout(title string, content *template.Template) *template.Template {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{{ .Title }} - Lantern</title>
+    <title>{{ PageTitle }} - Lantern</title>
     <style>
         * {
             margin: 0;
@@ -406,7 +406,7 @@ func baseLayout(title string, content *template.Template) *template.Template {
     </nav>
 
     <div class="container">
-        <h1>{{ .Title }}</h1>
+        <h1>{{ PageTitle }}</h1>
         {{ template "content" . }}
     </div>
 
@@ -414,7 +414,11 @@ func baseLayout(title string, content *template.Template) *template.Template {
 </body>
 </html>`
 
-	base, err := template.New("base").Parse(baseHTML)
+	base := template.New("base").Funcs(template.FuncMap{
+		"PageTitle": func() string { return title },
+	})
+
+	base, err := base.Parse(baseHTML)
 	if err != nil {
 		panic(err)
 	}
@@ -424,9 +428,7 @@ func baseLayout(title string, content *template.Template) *template.Template {
 		panic(err)
 	}
 
-	return base.Funcs(template.FuncMap{
-		"Title": func() string { return title },
-	})
+	return base
 }
 
 // dashboardContent returns the dashboard content template.

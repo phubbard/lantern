@@ -11,7 +11,7 @@ import (
 
 type Blocker struct {
 	mu      sync.RWMutex
-	domains map[string]bool  // blocked domains
+	domains map[string]bool // blocked domains
 	lists   []BlocklistInfo
 	logger  *slog.Logger
 }
@@ -117,7 +117,10 @@ func (b *Blocker) LoadFile(path string) (int, error) {
 
 // LoadFiles loads multiple blocklists from a config slice.
 // Skips any with Enabled=false.
-func (b *Blocker) LoadFiles(configs []struct{ Path string; Enabled bool }) error {
+func (b *Blocker) LoadFiles(configs []struct {
+	Path    string
+	Enabled bool
+}) error {
 	for _, cfg := range configs {
 		if !cfg.Enabled {
 			continue

@@ -53,14 +53,14 @@ type Config struct {
 
 // DHCPConfig contains DHCP server configuration
 type DHCPConfig struct {
-	Subnet       string    `json:"subnet"`
-	RangeStart   string    `json:"range_start"`
-	RangeEnd     string    `json:"range_end"`
-	Gateway      string    `json:"gateway"`
-	DNSServers   []string  `json:"dns_servers"`
-	DefaultTTL   Duration  `json:"default_ttl"`
-	StaticTTL    Duration  `json:"static_ttl"`
-	LeaseFile    string    `json:"lease_file"`
+	Subnet       string     `json:"subnet"`
+	RangeStart   string     `json:"range_start"`
+	RangeEnd     string     `json:"range_end"`
+	Gateway      string     `json:"gateway"`
+	DNSServers   []string   `json:"dns_servers"`
+	DefaultTTL   Duration   `json:"default_ttl"`
+	StaticTTL    Duration   `json:"static_ttl"`
+	LeaseFile    string     `json:"lease_file"`
 	subnetIPNet  *net.IPNet // parsed subnet
 	rangeStartIP net.IP     // parsed range start
 	rangeEndIP   net.IP     // parsed range end
@@ -69,8 +69,8 @@ type DHCPConfig struct {
 
 // DNSConfig contains DNS server configuration
 type DNSConfig struct {
-	Listen     string         `json:"listen"`
-	NameFormat NameFormatCfg  `json:"name_format"`
+	Listen     string        `json:"listen"`
+	NameFormat NameFormatCfg `json:"name_format"`
 }
 
 // NameFormatCfg contains name format templates
@@ -81,10 +81,10 @@ type NameFormatCfg struct {
 
 // UpstreamConfig contains upstream DNS configuration
 type UpstreamConfig struct {
-	DOHURL          string `json:"doh_url"`
+	DOHURL          string   `json:"doh_url"`
 	FallbackServers []string `json:"fallback_servers"`
-	CacheMaxEntries int    `json:"cache_max_entries"`
-	CacheDB         string `json:"cache_db"`
+	CacheMaxEntries int      `json:"cache_max_entries"`
+	CacheDB         string   `json:"cache_db"`
 }
 
 // BlocklistConfig represents a blocklist configuration
@@ -95,10 +95,10 @@ type BlocklistConfig struct {
 
 // StaticHost represents a static host mapping
 type StaticHost struct {
-	MAC  string `json:"mac"`
-	IP   string `json:"ip"`
-	Name string `json:"name"`
-	ip   net.IP // parsed IP
+	MAC  string           `json:"mac"`
+	IP   string           `json:"ip"`
+	Name string           `json:"name"`
+	ip   net.IP           // parsed IP
 	mac  net.HardwareAddr // parsed MAC
 }
 

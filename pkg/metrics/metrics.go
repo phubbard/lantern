@@ -10,18 +10,18 @@ import (
 
 const (
 	// Histogram range: 1 to 60_000_000 microseconds (60 seconds)
-	histoMin      = int64(1)
-	histoMax      = int64(60_000_000)
-	histoSigFigs  = 3
+	histoMin     = int64(1)
+	histoMax     = int64(60_000_000)
+	histoSigFigs = 3
 )
 
 // LatencySource constants for different query sources
 const (
-	SourceLocal         = "local"
-	SourceCached        = "cached"
-	SourceUpstreamDoH   = "upstream_doh"
-	SourceUpstreamFall  = "upstream_fallback"
-	SourceBlocked       = "blocked"
+	SourceLocal        = "local"
+	SourceCached       = "cached"
+	SourceUpstreamDoH  = "upstream_doh"
+	SourceUpstreamFall = "upstream_fallback"
+	SourceBlocked      = "blocked"
 )
 
 // Collector tracks latency and counters for lantern server operations.
@@ -32,28 +32,28 @@ type Collector struct {
 	histograms map[string]*hdrhistogram.Histogram
 
 	// Atomic counters
-	QueriesTotal      uint64
-	QueriesLocal      uint64
-	QueriesCached     uint64
-	QueriesUpstream   uint64
-	QueriesBlocked    uint64
-	DHCPDiscovers     uint64
-	DHCPOffers        uint64
-	DHCPRequests      uint64
-	DHCPAcks          uint64
-	DHCPNaks          uint64
-	DHCPReleases      uint64
-	CacheHits         uint64
-	CacheMisses       uint64
+	QueriesTotal    uint64
+	QueriesLocal    uint64
+	QueriesCached   uint64
+	QueriesUpstream uint64
+	QueriesBlocked  uint64
+	DHCPDiscovers   uint64
+	DHCPOffers      uint64
+	DHCPRequests    uint64
+	DHCPAcks        uint64
+	DHCPNaks        uint64
+	DHCPReleases    uint64
+	CacheHits       uint64
+	CacheMisses     uint64
 }
 
 // LatencyStats holds latency percentiles for a query source.
 type LatencyStats struct {
-	P5   float64 // milliseconds
-	P50  float64 // milliseconds
-	P90  float64 // milliseconds
-	P95  float64 // milliseconds
-	P99  float64 // milliseconds
+	P5    float64 // milliseconds
+	P50   float64 // milliseconds
+	P90   float64 // milliseconds
+	P95   float64 // milliseconds
+	P99   float64 // milliseconds
 	Count int64
 }
 
@@ -213,11 +213,11 @@ func (c *Collector) Snapshot() *MetricsSnapshot {
 	// Extract percentiles from each histogram
 	for source, h := range c.histograms {
 		stats := LatencyStats{
-			P5:   float64(h.ValueAtPercentile(5)) / 1000.0,   // convert microseconds to milliseconds
-			P50:  float64(h.ValueAtPercentile(50)) / 1000.0,
-			P90:  float64(h.ValueAtPercentile(90)) / 1000.0,
-			P95:  float64(h.ValueAtPercentile(95)) / 1000.0,
-			P99:  float64(h.ValueAtPercentile(99)) / 1000.0,
+			P5:    float64(h.ValueAtPercentile(5)) / 1000.0, // convert microseconds to milliseconds
+			P50:   float64(h.ValueAtPercentile(50)) / 1000.0,
+			P90:   float64(h.ValueAtPercentile(90)) / 1000.0,
+			P95:   float64(h.ValueAtPercentile(95)) / 1000.0,
+			P99:   float64(h.ValueAtPercentile(99)) / 1000.0,
 			Count: h.TotalCount(),
 		}
 		snap.Latency[source] = stats

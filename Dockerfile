@@ -23,7 +23,7 @@ ARG VERSION=dev
 ARG BUILD_DATE
 ARG VCS_REF
 
-RUN CGO_ENABLED=1 GOOS=linux GOARCH=amd64 \
+RUN CGO_ENABLED=1 \
     go build \
     -ldflags="-s -w -X main.Version=${VERSION} -X main.BuildDate=${BUILD_DATE} -X main.VcsRef=${VCS_REF}" \
     -o lantern \

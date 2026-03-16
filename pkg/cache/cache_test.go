@@ -304,9 +304,9 @@ func TestCache_DifferentQTypes(t *testing.T) {
 	name := "example.com"
 
 	// Store different query types for same name
-	cache.Put(name, uint16(1), []byte{0x01}, 3600)   // TypeA
-	cache.Put(name, uint16(28), []byte{0x02}, 3600)  // TypeAAAA
-	cache.Put(name, uint16(16), []byte{0x03}, 3600)  // TypeTXT
+	cache.Put(name, uint16(1), []byte{0x01}, 3600)  // TypeA
+	cache.Put(name, uint16(28), []byte{0x02}, 3600) // TypeAAAA
+	cache.Put(name, uint16(16), []byte{0x03}, 3600) // TypeTXT
 
 	// Retrieve each type
 	data1, ok1 := cache.Get(name, uint16(1))

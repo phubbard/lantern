@@ -39,7 +39,7 @@ func main() {
 	}
 
 	// Global flags
-	rootCmd.PersistentFlags().StringVar(&socketPath, "socket", "/var/run/lantern.sock",
+	rootCmd.PersistentFlags().StringVar(&socketPath, "socket", "/var/run/lantern/lantern.sock",
 		"Path to lantern control socket")
 
 	// Serve command

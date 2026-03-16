@@ -17,7 +17,7 @@ import (
 // TCPSignature represents the fields extracted from a TCP SYN packet
 type TCPSignature struct {
 	IPVersion  int
-	IPTTL      uint8  // initial TTL (infer from observed TTL)
+	IPTTL      uint8 // initial TTL (infer from observed TTL)
 	IPDontFrag bool
 	TCPWindow  uint16
 	TCPOptions string // ordered option list like "mss,nop,ws,nop,nop,ts,sok,eol"

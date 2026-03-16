@@ -96,12 +96,12 @@ func NewStore(perHostLimit int) *Store {
 		perHostLimit = 1000
 	}
 	return &Store{
-		byMAC:       make(map[string]*RingBuffer),
-		byIP:        make(map[string]*RingBuffer),
-		byClientID:  make(map[string]*RingBuffer),
-		recent:      NewRingBuffer(perHostLimit * 10), // global buffer is larger
+		byMAC:        make(map[string]*RingBuffer),
+		byIP:         make(map[string]*RingBuffer),
+		byClientID:   make(map[string]*RingBuffer),
+		recent:       NewRingBuffer(perHostLimit * 10), // global buffer is larger
 		perHostLimit: perHostLimit,
-		subscribers: make(map[chan model.HostEvent]struct{}),
+		subscribers:  make(map[chan model.HostEvent]struct{}),
 	}
 }
 
