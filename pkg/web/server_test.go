@@ -42,7 +42,7 @@ func newTestServer() *Server {
 	e := events.NewStore(100)
 	b := blocker.New(testLogger())
 
-	return New(cfg, pool, m, e, b, testLogger())
+	return New(cfg, pool, m, e, b, nil, testLogger())
 }
 
 func TestNew(t *testing.T) {
