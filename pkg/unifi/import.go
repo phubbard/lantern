@@ -14,8 +14,8 @@ import (
 type ClientEntry struct {
 	MAC      string `json:"mac"`
 	Name     string `json:"name"`
-	IP       string `json:"fixed_ip,omitempty"`  // fixed IP assignment
-	UseFixIP bool   `json:"use_fixedip"`         // whether fixed IP is active
+	IP       string `json:"fixed_ip,omitempty"`   // fixed IP assignment
+	UseFixIP bool   `json:"use_fixedip"`          // whether fixed IP is active
 	Hostname string `json:"hostname,omitempty"`   // discovered hostname
 	Network  string `json:"network_id,omitempty"` // which network the client belongs to
 	Note     string `json:"note,omitempty"`
@@ -24,17 +24,17 @@ type ClientEntry struct {
 
 // NetworkEntry represents a UniFi network definition.
 type NetworkEntry struct {
-	ID            string `json:"_id"`
-	Name          string `json:"name"`
-	Purpose       string `json:"purpose"` // "corporate", "guest", etc.
-	Subnet        string `json:"ip_subnet"`
-	Gateway       string `json:"gateway,omitempty"`
-	DHCPEnabled   bool   `json:"dhcpd_enabled"`
-	DHCPStart     string `json:"dhcpd_start,omitempty"`
-	DHCPStop      string `json:"dhcpd_stop,omitempty"`
+	ID             string   `json:"_id"`
+	Name           string   `json:"name"`
+	Purpose        string   `json:"purpose"` // "corporate", "guest", etc.
+	Subnet         string   `json:"ip_subnet"`
+	Gateway        string   `json:"gateway,omitempty"`
+	DHCPEnabled    bool     `json:"dhcpd_enabled"`
+	DHCPStart      string   `json:"dhcpd_start,omitempty"`
+	DHCPStop       string   `json:"dhcpd_stop,omitempty"`
 	DHCPDNSServers []string `json:"dhcpd_dns_1,omitempty"`
-	DomainName    string `json:"domain_name,omitempty"`
-	VLAN          int    `json:"vlan,omitempty"`
+	DomainName     string   `json:"domain_name,omitempty"`
+	VLAN           int      `json:"vlan,omitempty"`
 }
 
 // ImportResult holds the parsed data ready for Lantern config generation.

@@ -14,7 +14,7 @@ import (
 // working set backed by a persistent SQLite store for the long tail.
 type Cache struct {
 	db         *sql.DB
-	mem        *memLRU   // hot tier: sub-microsecond lookups
+	mem        *memLRU    // hot tier: sub-microsecond lookups
 	mu         sync.Mutex // serialize writes
 	maxEntries int
 	closed     bool

@@ -19,14 +19,14 @@ import (
 
 // Server is the HTTP server for the Lantern dashboard.
 type Server struct {
-	cfg          *config.Config
-	pool         *model.LeasePool
-	metrics      *metrics.Collector
-	events       *events.Store
-	blocker      *blocker.Blocker
+	cfg           *config.Config
+	pool          *model.LeasePool
+	metrics       *metrics.Collector
+	events        *events.Store
+	blocker       *blocker.Blocker
 	subscriptions *blocker.SubscriptionManager
-	httpSrv      *http.Server
-	logger       *slog.Logger
+	httpSrv       *http.Server
+	logger        *slog.Logger
 }
 
 // New creates a new Server instance.
@@ -236,9 +236,9 @@ func (s *Server) handleBlockerStatus(w http.ResponseWriter, r *http.Request) {
 	paused, remaining := s.blocker.IsPaused()
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"paused":           paused,
+		"paused":            paused,
 		"remaining_seconds": int(remaining.Seconds()),
-		"blocked_domains":  s.blocker.Count(),
+		"blocked_domains":   s.blocker.Count(),
 	})
 }
 
