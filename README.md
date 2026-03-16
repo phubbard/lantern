@@ -2,7 +2,7 @@
 
 [![Go 1.22+](https://img.shields.io/badge/Go-1.22+-00ADD8?logo=go)](https://golang.org/dl/)
 [![MIT License](https://img.shields.io/badge/License-MIT-green)](LICENSE)
-[![Build Status](https://img.shields.io/badge/build-passing-brightgreen)](#)
+[![CI](https://github.com/phubbard/lantern/actions/workflows/ci.yml/badge.svg)](https://github.com/phubbard/lantern/actions/workflows/ci.yml)
 
 A lightweight, self-hosted DNS and DHCP server for home networks. Combines dynamic host configuration, recursive DNS resolution, ad-blocking, and device fingerprinting into a single stateless binary. Inspired by Pi-hole and designed for minimal hardware (Raspberry Pi, NUC, VM).
 
