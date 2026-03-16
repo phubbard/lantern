@@ -89,17 +89,18 @@ func (c *Cache) Get(name string, qtype uint16) ([]byte, bool) {
 		return nil, false
 	}
 
-	// Check if expired
+	// Check if expired (cached_at is in seconds)
 	if now > cachedAt+ttlSeconds {
 		// Entry is expired, delete it
-		_ = c.db.Exec("DELETE FROM dns_cache WHERE query_name = ? AND query_type = ?", name, qtype)
+		_, _ = c.db.Exec("DELETE FROM dns_cache WHERE query_name = ? AND query_type = ?", name, qtype)
 		return nil, false
 	}
 
-	// Update last_used timestamp
+	// Update last_used timestamp (milliseconds for precise LRU ordering)
+	nowMs := time.Now().UnixMilli()
 	_, _ = c.db.Exec(`
 		UPDATE dns_cache SET last_used = ? WHERE query_name = ? AND query_type = ?
-	`, now, name, qtype)
+	`, nowMs, name, qtype)
 
 	return response, true
 }
@@ -111,8 +112,10 @@ func (c *Cache) Put(name string, qtype uint16, response []byte, ttl int) {
 	defer c.mu.Unlock()
 
 	now := time.Now().Unix()
+	nowMs := time.Now().UnixMilli()
 
 	// UPSERT: insert or replace
+	// cached_at is in seconds (for TTL expiry check), last_used is in milliseconds (for LRU ordering)
 	_, err := c.db.Exec(`
 		INSERT INTO dns_cache (query_name, query_type, response, ttl_seconds, cached_at, last_used)
 		VALUES (?, ?, ?, ?, ?, ?)
@@ -121,7 +124,7 @@ func (c *Cache) Put(name string, qtype uint16, response []byte, ttl int) {
 			ttl_seconds = excluded.ttl_seconds,
 			cached_at = excluded.cached_at,
 			last_used = excluded.last_used
-	`, name, qtype, response, ttl, now, now)
+	`, name, qtype, response, ttl, now, nowMs)
 
 	if err != nil {
 		c.logger.Error("cache put error", "name", name, "type", qtype, "err", err)

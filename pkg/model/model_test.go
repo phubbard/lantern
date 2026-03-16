@@ -2,7 +2,9 @@ package model
 
 import (
 	"encoding/json"
+	"fmt"
 	"net"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -503,8 +505,8 @@ func TestSanitizeHostname(t *testing.T) {
 		},
 		{
 			name:     "truncate to 63 chars",
-			input:    "a" + string(make([]byte, 70)),
-			expected: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"[:63],
+			input:    strings.Repeat("a", 70),
+			expected: strings.Repeat("a", 63),
 		},
 		{
 			name:     "empty after sanitize",
@@ -644,7 +646,7 @@ func TestGetAllLeases(t *testing.T) {
 	leases := make([]*Lease, 3)
 	for i := 0; i < 3; i++ {
 		mac := net.HardwareAddr{0xaa, 0xbb, 0xcc, 0xdd, 0xee, byte(i + 1)}
-		ip := net.ParseIP("192.168.1." + string(rune(100+i)))
+		ip := net.ParseIP(fmt.Sprintf("192.168.1.%d", 100+i))
 		leases[i] = &Lease{
 			MAC: mac,
 			IP:  ip,

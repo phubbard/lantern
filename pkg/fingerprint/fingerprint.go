@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"time"
 
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
@@ -474,7 +475,6 @@ func (db *SignatureDB) Match(sig TCPSignature) (entry SignatureEntry, confidence
 // scoreSimilarity computes a matching score between two signatures
 func scoreSimilarity(observed, candidate TCPSignature) float64 {
 	var score float64 = 0.0
-	var maxScore float64 = 100.0
 
 	// TTL matching (up to 30 points)
 	observedInitial := InferInitialTTL(observed.IPTTL)
@@ -690,25 +690,24 @@ func (s *Sniffer) processPacket(packet gopacket.Packet) {
 
 	// Build host fingerprint
 	fp := &model.HostFingerprint{
-		SourceMAC:  srcMAC,
-		SourceIP:   ipv4.SrcIP.String(),
 		OS:         entry.OS,
 		OSVersion:  entry.OSVersion,
 		DeviceType: entry.DeviceType,
 		Confidence: confidence,
-		Raw: &model.RawFingerprint{
-			IPVersion:  sig.IPVersion,
-			IPTTL:      sig.IPTTL,
-			IPDontFrag: sig.IPDontFrag,
-			TCPWindow:  sig.TCPWindow,
-			TCPOptions: sig.TCPOptions,
-			TCPMSS:     sig.TCPMSS,
-			TCPScale:   sig.TCPScale,
-		},
+		RawSig: fmt.Sprintf("ttl=%d;win=%d;mss=%d;scale=%d;opts=%s;df=%v",
+			sig.IPTTL, sig.TCPWindow, sig.TCPMSS, sig.TCPScale, sig.TCPOptions, sig.IPDontFrag),
+		FirstSeen: time.Now(),
+		LastSeen:  time.Now(),
 	}
 
 	// Record event
-	s.events.RecordFingerprint(srcMAC, fp)
+	s.events.Record(model.HostEvent{
+		Timestamp: time.Now(),
+		MAC:       srcMAC,
+		IP:        ipv4.SrcIP.String(),
+		Type:      model.EventFingerprint,
+		Detail:    fmt.Sprintf("os=%s;version=%s;type=%s;confidence=%.2f", entry.OS, entry.OSVersion, entry.DeviceType, confidence),
+	})
 
 	// Call callback
 	if s.callback != nil {

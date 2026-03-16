@@ -20,16 +20,16 @@ import (
 
 // Server implements a DHCPv4 server for home DNS.
 type Server struct {
-	cfg       *config.Config
-	pool      *model.LeasePool
-	metrics   *metrics.Collector
-	events    *events.Store
-	onLease   func(lease *model.Lease)
-	logger    *slog.Logger
-	mu        sync.RWMutex
-	server    *server4.Server
-	cancel    context.CancelFunc
-	done      chan struct{}
+	cfg     *config.Config
+	pool    *model.LeasePool
+	metrics *metrics.Collector
+	events  *events.Store
+	onLease func(lease *model.Lease)
+	logger  *slog.Logger
+	mu      sync.RWMutex
+	server  *server4.Server
+	cancel  context.CancelFunc
+	done    chan struct{}
 }
 
 // New creates a new DHCP server instance.
@@ -47,7 +47,7 @@ func New(cfg *config.Config, pool *model.LeasePool, m *metrics.Collector, e *eve
 
 // Start begins listening on UDP port 67 for DHCP requests.
 func (s *Server) Start(ctx context.Context) error {
-	s.logger.InfoContext(ctx, "starting DHCP server", "port", 67, "network", cfg.DHCP.Network)
+	s.logger.InfoContext(ctx, "starting DHCP server", "port", 67, "interface", s.cfg.Interface)
 
 	// Load existing leases from disk if available
 	if err := s.LoadLeases(); err != nil {
@@ -62,11 +62,11 @@ func (s *Server) Start(ctx context.Context) error {
 	go s.leaseReaper(serverCtx)
 
 	// Create the DHCP server with our handler
+	laddr := &net.UDPAddr{IP: net.IPv4zero, Port: 67}
 	srv, err := server4.NewServer(
-		s.cfg.DHCP.Network,
-		net.ParseIP(s.cfg.DHCP.Address),
+		s.cfg.Interface,
+		laddr,
 		s.handler,
-		server4.WithDebugLogger(),
 	)
 	if err != nil {
 		return fmt.Errorf("failed to create DHCP server: %w", err)
@@ -127,7 +127,7 @@ func (s *Server) handler(conn net.PacketConn, peer net.Addr, msg *dhcpv4.DHCPv4)
 		"client_hw_addr", msg.ClientHWAddr.String(),
 	)
 
-	s.metrics.RecordDHCPRequest(msg.MessageType().String())
+	s.metrics.IncrCounter("dhcp_requests")
 
 	switch msg.MessageType() {
 	case dhcpv4.MessageTypeDiscover:
@@ -147,13 +147,12 @@ func (s *Server) handler(conn net.PacketConn, peer net.Addr, msg *dhcpv4.DHCPv4)
 func (s *Server) handleDiscover(conn net.PacketConn, peer net.Addr, msg *dhcpv4.DHCPv4) {
 	ctx := context.Background()
 
-	// Extract client information
-	clientMAC := msg.ClientHWAddr.String()
+	clientMAC := msg.ClientHWAddr
 	hostname := msg.HostName()
 	clientID := s.extractClientID(msg)
 
 	s.logger.DebugContext(ctx, "handling DISCOVER",
-		"mac", clientMAC,
+		"mac", clientMAC.String(),
 		"hostname", hostname,
 		"client_id", clientID,
 	)
@@ -161,38 +160,50 @@ func (s *Server) handleDiscover(conn net.PacketConn, peer net.Addr, msg *dhcpv4.
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	s.metrics.IncrCounter("dhcp_discovers")
+
 	// Check for existing lease
 	var lease *model.Lease
-	existingLease, found := s.pool.GetByMAC(clientMAC)
-	if found && existingLease != nil {
+	existingLease := s.pool.FindByMAC(clientMAC)
+	if existingLease != nil {
 		lease = existingLease
 		s.logger.DebugContext(ctx, "found existing lease for DISCOVER",
-			"mac", clientMAC,
-			"ip", lease.IPAddress,
+			"mac", clientMAC.String(),
+			"ip", lease.IP.String(),
 		)
 	} else {
 		// Allocate new IP
-		ip, err := s.pool.Allocate(clientMAC, hostname)
+		ip, err := s.pool.AllocateIP()
 		if err != nil {
 			s.logger.ErrorContext(ctx, "failed to allocate IP for DISCOVER",
-				"mac", clientMAC,
+				"mac", clientMAC.String(),
 				"error", err,
 			)
-			s.metrics.RecordDHCPError("discover_allocation_failed")
 			return
 		}
 
+		leaseDuration := time.Duration(s.cfg.DHCP.DefaultTTL)
 		lease = &model.Lease{
-			ClientMAC:   clientMAC,
-			IPAddress:   ip.String(),
-			Hostname:    hostname,
-			ClientID:    clientID,
-			LeaseStart:  time.Now(),
-			LeaseExpiry: time.Now().Add(time.Duration(s.cfg.DHCP.LeaseTime) * time.Second),
+			MAC:       clientMAC,
+			IP:        ip,
+			Hostname:  hostname,
+			ClientID:  clientID,
+			TTL:       leaseDuration,
+			GrantedAt: time.Now(),
+			ExpiresAt: time.Now().Add(leaseDuration),
+		}
+
+		// Generate DNS name
+		lease.DNSName = s.pool.GenerateDNSName(lease, "")
+
+		// Store the lease
+		if err := s.pool.SetLease(lease); err != nil {
+			s.logger.ErrorContext(ctx, "failed to store lease", "error", err)
+			return
 		}
 
 		s.logger.InfoContext(ctx, "allocated new IP for DISCOVER",
-			"mac", clientMAC,
+			"mac", clientMAC.String(),
 			"ip", ip.String(),
 			"hostname", hostname,
 		)
@@ -203,41 +214,37 @@ func (s *Server) handleDiscover(conn net.PacketConn, peer net.Addr, msg *dhcpv4.
 	if err != nil {
 		s.logger.ErrorContext(ctx, "failed to create OFFER reply",
 			"error", err,
-			"mac", clientMAC,
+			"mac", clientMAC.String(),
 		)
-		s.metrics.RecordDHCPError("offer_creation_failed")
 		return
 	}
 
 	// Set OFFER parameters
 	reply.UpdateOption(dhcpv4.OptMessageType(dhcpv4.MessageTypeOffer))
-	reply.YourIPAddr = net.ParseIP(lease.IPAddress)
-	reply.ServerIPAddr = net.ParseIP(s.cfg.DHCP.Address)
+	reply.YourIPAddr = lease.IP
+	reply.ServerIPAddr = net.ParseIP(s.cfg.DHCP.Gateway)
 
 	// Build and add options
-	options := s.buildOptions(lease)
-	for _, opt := range options {
-		reply.UpdateOption(opt)
-	}
+	s.setDHCPOptions(reply)
 
 	// Send response
 	s.sendResponse(conn, peer, reply)
 
 	// Record event
-	s.events.Record(events.Event{
-		Type:      events.EventTypeDHCPOffer,
+	s.events.Record(model.HostEvent{
 		Timestamp: time.Now(),
-		ClientMAC: clientMAC,
-		Hostname:  hostname,
-		IPAddress: lease.IPAddress,
-		Details:   map[string]string{"client_id": clientID},
+		MAC:       clientMAC.String(),
+		IP:        lease.IP.String(),
+		ClientID:  clientID,
+		Type:      model.EventDHCPOffer,
+		Detail:    fmt.Sprintf("hostname=%s", hostname),
 	})
 
-	s.metrics.RecordDHCPOffer()
+	s.metrics.IncrCounter("dhcp_offers")
 
 	s.logger.InfoContext(ctx, "sent DHCP OFFER",
-		"mac", clientMAC,
-		"ip", lease.IPAddress,
+		"mac", clientMAC.String(),
+		"ip", lease.IP.String(),
 		"hostname", hostname,
 	)
 }
@@ -246,156 +253,157 @@ func (s *Server) handleDiscover(conn net.PacketConn, peer net.Addr, msg *dhcpv4.
 func (s *Server) handleRequest(conn net.PacketConn, peer net.Addr, msg *dhcpv4.DHCPv4) {
 	ctx := context.Background()
 
-	clientMAC := msg.ClientHWAddr.String()
+	clientMAC := msg.ClientHWAddr
 	hostname := msg.HostName()
 	clientID := s.extractClientID(msg)
 
 	// Extract requested IP from Option 50 or use ClientIPAddr for renewal
-	var requestedIP net.IP
-	if requestedIPOpt := msg.GetOneOption(dhcpv4.OptionRequestedIPAddress); requestedIPOpt != nil {
-		requestedIP = requestedIPOpt.(*dhcpv4.OptRequestedIPAddress).RequestedIPAddr
-	} else if !msg.ClientIPAddr.IsUnspecified() {
-		requestedIP = msg.ClientIPAddr
+	requestedIP := msg.RequestedIPAddress()
+	if requestedIP == nil || requestedIP.IsUnspecified() {
+		if !msg.ClientIPAddr.IsUnspecified() {
+			requestedIP = msg.ClientIPAddr
+		}
 	}
 
 	s.logger.DebugContext(ctx, "handling REQUEST",
-		"mac", clientMAC,
+		"mac", clientMAC.String(),
 		"hostname", hostname,
-		"requested_ip", requestedIP.String(),
+		"requested_ip", requestedIP,
 		"client_id", clientID,
 	)
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	// Validate the request
-	existingLease, found := s.pool.GetByIP(requestedIP.String())
-	if !found || existingLease == nil || existingLease.ClientMAC != clientMAC {
+	// Validate the request — look up by the requested IP
+	if requestedIP == nil {
+		s.sendNAK(conn, peer, msg, clientMAC, hostname)
+		return
+	}
+
+	existingLease := s.pool.FindByIP(requestedIP)
+	if existingLease == nil || existingLease.MAC.String() != clientMAC.String() {
 		// Invalid request - send NAK
 		s.logger.WarnContext(ctx, "rejecting REQUEST - lease validation failed",
-			"mac", clientMAC,
+			"mac", clientMAC.String(),
 			"requested_ip", requestedIP.String(),
-			"found", found,
 		)
-
-		reply, err := dhcpv4.NewReplyFromRequest(msg)
-		if err != nil {
-			s.logger.ErrorContext(ctx, "failed to create NAK reply", "error", err)
-			s.metrics.RecordDHCPError("nak_creation_failed")
-			return
-		}
-
-		reply.UpdateOption(dhcpv4.OptMessageType(dhcpv4.MessageTypeNak))
-		reply.ServerIPAddr = net.ParseIP(s.cfg.DHCP.Address)
-		s.sendResponse(conn, peer, reply)
-
-		s.events.Record(events.Event{
-			Type:      events.EventTypeDHCPNak,
-			Timestamp: time.Now(),
-			ClientMAC: clientMAC,
-			Hostname:  hostname,
-			IPAddress: requestedIP.String(),
-			Details:   map[string]string{"reason": "lease_validation_failed"},
-		})
-
-		s.metrics.RecordDHCPNak()
+		s.sendNAK(conn, peer, msg, clientMAC, hostname)
 		return
 	}
 
 	// Update lease with current information
-	lease := existingLease
-	lease.Hostname = hostname
-	lease.ClientID = clientID
-	lease.LeaseStart = time.Now()
-	lease.LeaseExpiry = time.Now().Add(time.Duration(s.cfg.DHCP.LeaseTime) * time.Second)
+	leaseDuration := time.Duration(s.cfg.DHCP.DefaultTTL)
+	existingLease.Hostname = hostname
+	existingLease.ClientID = clientID
+	existingLease.GrantedAt = time.Now()
+	existingLease.ExpiresAt = time.Now().Add(leaseDuration)
+	existingLease.DNSName = s.pool.GenerateDNSName(existingLease, "")
 
 	// Build ACK response
 	reply, err := dhcpv4.NewReplyFromRequest(msg)
 	if err != nil {
 		s.logger.ErrorContext(ctx, "failed to create ACK reply",
 			"error", err,
-			"mac", clientMAC,
+			"mac", clientMAC.String(),
 		)
-		s.metrics.RecordDHCPError("ack_creation_failed")
 		return
 	}
 
 	reply.UpdateOption(dhcpv4.OptMessageType(dhcpv4.MessageTypeAck))
 	reply.YourIPAddr = requestedIP
-	reply.ServerIPAddr = net.ParseIP(s.cfg.DHCP.Address)
+	reply.ServerIPAddr = net.ParseIP(s.cfg.DHCP.Gateway)
 
 	// Build and add options
-	options := s.buildOptions(lease)
-	for _, opt := range options {
-		reply.UpdateOption(opt)
-	}
+	s.setDHCPOptions(reply)
 
 	// Send response
 	s.sendResponse(conn, peer, reply)
 
 	// Call the lease callback to update DNS
 	if s.onLease != nil {
-		s.onLease(lease)
+		s.onLease(existingLease)
 	}
 
 	// Record event
-	s.events.Record(events.Event{
-		Type:      events.EventTypeDHCPAck,
+	s.events.Record(model.HostEvent{
 		Timestamp: time.Now(),
-		ClientMAC: clientMAC,
-		Hostname:  hostname,
-		IPAddress: lease.IPAddress,
-		Details:   map[string]string{"client_id": clientID},
+		MAC:       clientMAC.String(),
+		IP:        existingLease.IP.String(),
+		ClientID:  clientID,
+		Type:      model.EventDHCPAck,
+		Detail:    fmt.Sprintf("hostname=%s", hostname),
 	})
 
-	s.metrics.RecordDHCPAck()
+	s.metrics.IncrCounter("dhcp_acks")
 
 	s.logger.InfoContext(ctx, "sent DHCP ACK",
-		"mac", clientMAC,
-		"ip", lease.IPAddress,
+		"mac", clientMAC.String(),
+		"ip", existingLease.IP.String(),
 		"hostname", hostname,
 	)
+}
+
+// sendNAK sends a DHCP NAK response.
+func (s *Server) sendNAK(conn net.PacketConn, peer net.Addr, msg *dhcpv4.DHCPv4, clientMAC net.HardwareAddr, hostname string) {
+	reply, err := dhcpv4.NewReplyFromRequest(msg)
+	if err != nil {
+		s.logger.Error("failed to create NAK reply", "error", err)
+		return
+	}
+
+	reply.UpdateOption(dhcpv4.OptMessageType(dhcpv4.MessageTypeNak))
+	reply.ServerIPAddr = net.ParseIP(s.cfg.DHCP.Gateway)
+	s.sendResponse(conn, peer, reply)
+
+	s.events.Record(model.HostEvent{
+		Timestamp: time.Now(),
+		MAC:       clientMAC.String(),
+		Type:      model.EventDHCPNak,
+		Detail:    fmt.Sprintf("hostname=%s reason=lease_validation_failed", hostname),
+	})
+
+	s.metrics.IncrCounter("dhcp_naks")
 }
 
 // handleRelease processes DHCP RELEASE messages.
 func (s *Server) handleRelease(conn net.PacketConn, peer net.Addr, msg *dhcpv4.DHCPv4) {
 	ctx := context.Background()
 
-	clientMAC := msg.ClientHWAddr.String()
-	ipAddr := msg.ClientIPAddr.String()
+	clientMAC := msg.ClientHWAddr
+	ipAddr := msg.ClientIPAddr
 
 	s.logger.DebugContext(ctx, "handling RELEASE",
-		"mac", clientMAC,
-		"ip", ipAddr,
+		"mac", clientMAC.String(),
+		"ip", ipAddr.String(),
 	)
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	// Release the lease
-	if err := s.pool.Release(ipAddr); err != nil {
+	// Release the lease by MAC
+	if err := s.pool.ReleaseLease(clientMAC); err != nil {
 		s.logger.WarnContext(ctx, "failed to release lease",
-			"ip", ipAddr,
-			"mac", clientMAC,
+			"ip", ipAddr.String(),
+			"mac", clientMAC.String(),
 			"error", err,
 		)
-		s.metrics.RecordDHCPError("release_failed")
 		return
 	}
 
 	// Record event
-	s.events.Record(events.Event{
-		Type:      events.EventTypeDHCPRelease,
+	s.events.Record(model.HostEvent{
 		Timestamp: time.Now(),
-		ClientMAC: clientMAC,
-		IPAddress: ipAddr,
+		MAC:       clientMAC.String(),
+		IP:        ipAddr.String(),
+		Type:      model.EventDHCPRelease,
 	})
 
-	s.metrics.RecordDHCPRelease()
+	s.metrics.IncrCounter("dhcp_releases")
 
 	s.logger.InfoContext(ctx, "released DHCP lease",
-		"mac", clientMAC,
-		"ip", ipAddr,
+		"mac", clientMAC.String(),
+		"ip", ipAddr.String(),
 	)
 }
 
@@ -403,34 +411,33 @@ func (s *Server) handleRelease(conn net.PacketConn, peer net.Addr, msg *dhcpv4.D
 func (s *Server) handleDecline(conn net.PacketConn, peer net.Addr, msg *dhcpv4.DHCPv4) {
 	ctx := context.Background()
 
-	clientMAC := msg.ClientHWAddr.String()
-	ipAddr := msg.ClientIPAddr.String()
+	clientMAC := msg.ClientHWAddr
+	ipAddr := msg.ClientIPAddr
 
 	s.logger.WarnContext(ctx, "received DHCP DECLINE",
-		"mac", clientMAC,
-		"ip", ipAddr,
+		"mac", clientMAC.String(),
+		"ip", ipAddr.String(),
 	)
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	// Mark the IP as declined/unavailable
-	if err := s.pool.Release(ipAddr); err != nil {
+	// Mark the IP as declined by releasing the lease
+	if err := s.pool.ReleaseLease(clientMAC); err != nil {
 		s.logger.ErrorContext(ctx, "failed to release declined IP",
-			"ip", ipAddr,
+			"ip", ipAddr.String(),
 			"error", err,
 		)
 	}
 
 	// Record event
-	s.events.Record(events.Event{
-		Type:      events.EventTypeDHCPDecline,
+	s.events.Record(model.HostEvent{
 		Timestamp: time.Now(),
-		ClientMAC: clientMAC,
-		IPAddress: ipAddr,
+		MAC:       clientMAC.String(),
+		IP:        ipAddr.String(),
+		Type:      model.EventDHCPRequest, // closest match for decline
+		Detail:    "decline",
 	})
-
-	s.metrics.RecordDHCPDecline()
 }
 
 // sendResponse sends a DHCP response packet to the client.
@@ -444,7 +451,6 @@ func (s *Server) sendResponse(conn net.PacketConn, peer net.Addr, resp *dhcpv4.D
 			"peer", peer.String(),
 			"error", err,
 		)
-		s.metrics.RecordDHCPError("send_failed")
 		return
 	}
 
@@ -454,58 +460,52 @@ func (s *Server) sendResponse(conn net.PacketConn, peer net.Addr, resp *dhcpv4.D
 	)
 }
 
-// buildOptions constructs standard DHCP options for a lease.
-func (s *Server) buildOptions(lease *model.Lease) []dhcpv4.Option {
-	var options []dhcpv4.Option
-
-	// Subnet mask
-	if s.cfg.DHCP.SubnetMask != "" {
-		options = append(options, dhcpv4.OptSubnetMask(net.ParseIP(s.cfg.DHCP.SubnetMask)))
+// setDHCPOptions applies standard DHCP options to a reply message.
+func (s *Server) setDHCPOptions(reply *dhcpv4.DHCPv4) {
+	// Subnet mask — derive from CIDR
+	_, ipnet, err := net.ParseCIDR(s.cfg.DHCP.Subnet)
+	if err == nil && ipnet != nil {
+		reply.UpdateOption(dhcpv4.OptSubnetMask(ipnet.Mask))
 	}
 
 	// Router (gateway)
-	if s.cfg.DHCP.Router != "" {
-		options = append(options, dhcpv4.OptRouter(net.ParseIP(s.cfg.DHCP.Router)))
+	gateway := net.ParseIP(s.cfg.DHCP.Gateway)
+	if gateway != nil {
+		reply.UpdateOption(dhcpv4.OptRouter(gateway))
 	}
 
 	// DNS servers
 	if len(s.cfg.DHCP.DNSServers) > 0 {
 		dnsIPs := make([]net.IP, 0, len(s.cfg.DHCP.DNSServers))
-		for _, dns := range s.cfg.DHCP.DNSServers {
-			dnsIPs = append(dnsIPs, net.ParseIP(dns))
+		for _, dnsStr := range s.cfg.DHCP.DNSServers {
+			if ip := net.ParseIP(dnsStr); ip != nil {
+				dnsIPs = append(dnsIPs, ip)
+			}
 		}
-		options = append(options, dhcpv4.OptDNS(dnsIPs...))
+		if len(dnsIPs) > 0 {
+			reply.UpdateOption(dhcpv4.OptDNS(dnsIPs...))
+		}
 	}
 
 	// Lease time
-	leaseTime := time.Duration(s.cfg.DHCP.LeaseTime) * time.Second
-	options = append(options, dhcpv4.OptIPAddressLeaseTime(leaseTime))
+	leaseTime := time.Duration(s.cfg.DHCP.DefaultTTL)
+	reply.UpdateOption(dhcpv4.OptIPAddressLeaseTime(leaseTime))
 
 	// DHCP Server Identifier
-	options = append(options, dhcpv4.OptServerIdentifier(net.ParseIP(s.cfg.DHCP.Address)))
-
-	// Renewal time (T1) - typically 50% of lease time
-	t1 := leaseTime / 2
-	options = append(options, dhcpv4.OptRebindingTimeValue(t1))
-
-	// Rebinding time (T2) - typically 87.5% of lease time
-	t2 := (leaseTime * 7) / 8
-	options = append(options, dhcpv4.OptRebindingTimeValue(t2))
+	if gateway != nil {
+		reply.UpdateOption(dhcpv4.OptServerIdentifier(gateway))
+	}
 
 	// Domain name
 	if s.cfg.Domain != "" {
-		options = append(options, dhcpv4.OptDomainName(s.cfg.Domain))
+		reply.UpdateOption(dhcpv4.OptDomainName(s.cfg.Domain))
 	}
-
-	return options
 }
 
 // extractClientID extracts the client ID from DHCP options.
 func (s *Server) extractClientID(msg *dhcpv4.DHCPv4) string {
-	if clientIDOpt := msg.GetOneOption(dhcpv4.OptionClientIdentifier); clientIDOpt != nil {
-		if opt, ok := clientIDOpt.(*dhcpv4.OptClientIdentifier); ok {
-			return opt.ClientID
-		}
+	if opt := msg.Options.Get(dhcpv4.OptionClientIdentifier); opt != nil {
+		return string(opt)
 	}
 	return ""
 }
@@ -535,23 +535,29 @@ func (s *Server) expireLeases() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	expired := s.pool.ExpireLeases(time.Now())
-	for _, lease := range expired {
-		s.logger.InfoContext(ctx, "lease expired",
-			"mac", lease.ClientMAC,
-			"ip", lease.IPAddress,
-			"hostname", lease.Hostname,
-		)
+	now := time.Now()
+	allLeases := s.pool.GetAllLeases()
+	for _, lease := range allLeases {
+		if lease.Static {
+			continue // Static leases don't expire
+		}
+		if now.After(lease.ExpiresAt) {
+			s.logger.InfoContext(ctx, "lease expired",
+				"mac", lease.MAC.String(),
+				"ip", lease.IP.String(),
+				"hostname", lease.Hostname,
+			)
 
-		s.events.Record(events.Event{
-			Type:      events.EventTypeDHCPExpired,
-			Timestamp: time.Now(),
-			ClientMAC: lease.ClientMAC,
-			IPAddress: lease.IPAddress,
-			Hostname:  lease.Hostname,
-		})
+			s.events.Record(model.HostEvent{
+				Timestamp: now,
+				MAC:       lease.MAC.String(),
+				IP:        lease.IP.String(),
+				Type:      model.EventLeaseExpired,
+				Detail:    fmt.Sprintf("hostname=%s", lease.Hostname),
+			})
 
-		s.metrics.RecordDHCPExpired()
+			_ = s.pool.ReleaseLease(lease.MAC)
+		}
 	}
 }
 
@@ -560,7 +566,7 @@ func (s *Server) SaveLeases() error {
 	ctx := context.Background()
 
 	s.mu.RLock()
-	leases := s.pool.GetAll()
+	leases := s.pool.GetAllLeases()
 	s.mu.RUnlock()
 
 	if s.cfg.DHCP.LeaseFile == "" {
@@ -619,16 +625,16 @@ func (s *Server) LoadLeases() error {
 
 	for _, lease := range leases {
 		// Skip expired leases
-		if lease.LeaseExpiry.Before(now) {
+		if !lease.Static && lease.ExpiresAt.Before(now) {
 			expiredCount++
 			continue
 		}
 
 		// Restore lease to pool
-		if err := s.pool.Restore(lease); err != nil {
+		if err := s.pool.SetLease(lease); err != nil {
 			s.logger.WarnContext(ctx, "failed to restore lease",
-				"mac", lease.ClientMAC,
-				"ip", lease.IPAddress,
+				"mac", lease.MAC.String(),
+				"ip", lease.IP.String(),
 				"error", err,
 			)
 			continue

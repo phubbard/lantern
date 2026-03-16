@@ -3,6 +3,7 @@ package dns
 import (
 	"context"
 	"net"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -99,7 +100,7 @@ func TestZone_UpdateFromLease_TXT_With_Fingerprint(t *testing.T) {
 		Fingerprint: &model.HostFingerprint{
 			OS:         "Linux",
 			DeviceType: "Desktop",
-			Vendor:     "Generic",
+			RawSig:     "generic",
 		},
 	}
 
@@ -121,7 +122,7 @@ func TestZone_UpdateFromLease_TXT_With_Fingerprint(t *testing.T) {
 		t.Fatalf("expected 1 TXT string, got %d", len(txtRecord.Txt))
 	}
 
-	expected := "os=Linux;type=Desktop;vendor=Generic"
+	expected := "os=Linux;type=Desktop"
 	if txtRecord.Txt[0] != expected {
 		t.Errorf("expected TXT %q, got %q", expected, txtRecord.Txt[0])
 	}
@@ -252,7 +253,7 @@ func TestZone_Lookup_TXT(t *testing.T) {
 		Fingerprint: &model.HostFingerprint{
 			OS:         "macOS",
 			DeviceType: "Laptop",
-			Vendor:     "Apple",
+			RawSig:     "apple",
 		},
 	}
 
@@ -495,10 +496,10 @@ func TestServer_UpstreamForwarding(t *testing.T) {
 		},
 	}
 
-	upstreamCalled := false
+	var upstreamCalled atomic.Bool
 	resolver := &MockResolver{
 		resolveFunc: func(ctx context.Context, msg *dns.Msg) (*dns.Msg, string, error) {
-			upstreamCalled = true
+			upstreamCalled.Store(true)
 			// Return a response with a synthetic A record
 			resp := msg.Copy()
 			rr := &dns.A{
@@ -538,7 +539,7 @@ func TestServer_UpstreamForwarding(t *testing.T) {
 		t.Fatalf("DNS query failed: %v", err)
 	}
 
-	if !upstreamCalled {
+	if !upstreamCalled.Load() {
 		t.Error("upstream resolver was not called")
 	}
 

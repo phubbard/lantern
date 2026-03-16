@@ -436,6 +436,12 @@ func (c *Config) validateBlocklists() error {
 }
 
 func (c *Config) validateStaticHosts() error {
+	// Parse the DHCP subnet so we can check containment
+	var subnet *net.IPNet
+	if c.DHCP.Subnet != "" {
+		_, subnet, _ = net.ParseCIDR(c.DHCP.Subnet)
+	}
+
 	for i, host := range c.StaticHosts {
 		if host.Name == "" {
 			return fmt.Errorf("static_hosts[%d].name is required", i)
@@ -448,6 +454,11 @@ func (c *Config) validateStaticHosts() error {
 		ip := net.ParseIP(host.IP)
 		if ip == nil {
 			return fmt.Errorf("static_hosts[%d].ip is not valid: %s", i, host.IP)
+		}
+
+		// Check that static IP is within the DHCP subnet
+		if subnet != nil && !subnet.Contains(ip) {
+			return fmt.Errorf("static_hosts[%d].ip %s is not in subnet %s", i, host.IP, c.DHCP.Subnet)
 		}
 		c.StaticHosts[i].ip = ip
 

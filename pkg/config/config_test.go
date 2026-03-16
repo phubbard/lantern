@@ -445,6 +445,8 @@ func TestConfig_Validate_InvalidLogFormat(t *testing.T) {
 }
 
 func TestConfig_Validate_CacheBoundaries(t *testing.T) {
+	// Don't call SetDefaults() — it would override CacheMaxEntries: 0 to 50000.
+	// Instead, manually provide all required fields.
 	cfg := &Config{
 		Domain:    "test.lab",
 		Interface: "eth0",
@@ -453,16 +455,32 @@ func TestConfig_Validate_CacheBoundaries(t *testing.T) {
 			RangeStart: "10.0.0.100",
 			RangeEnd:   "10.0.0.200",
 			Gateway:    "10.0.0.1",
+			DefaultTTL: Duration(5 * time.Minute),
+			StaticTTL:  Duration(24 * time.Hour),
+			LeaseFile:  "/tmp/leases.json",
+		},
+		DNS: DNSConfig{
+			Listen: ":53",
+			NameFormat: NameFormatCfg{
+				WithHostname: "{{.Hostname}}.{{.Domain}}",
+				Fallback:     "dhcp-{{.IP4}}.{{.Domain}}",
+			},
 		},
 		Upstream: UpstreamConfig{
 			DOHURL:          "https://1.1.1.1/dns-query",
 			FallbackServers: []string{"8.8.8.8:53"},
-			CacheMaxEntries: 0, // Invalid
+			CacheMaxEntries: 0, // Invalid — should fail validation
 			CacheDB:         "/tmp/cache.db",
+		},
+		Events: EventsConfig{
+			PerHostLimit: 100,
+		},
+		Logging: LoggingConfig{
+			Level:  "info",
+			Format: "text",
 		},
 	}
 
-	cfg.SetDefaults()
 	err := cfg.Validate()
 	if err == nil {
 		t.Error("expected error for invalid cache max entries")
@@ -575,6 +593,7 @@ func TestConfig_StaticHostGetters(t *testing.T) {
 }
 
 func TestConfig_EventsValidation(t *testing.T) {
+	// Don't call SetDefaults() — it would override PerHostLimit: 0 to 100.
 	cfg := &Config{
 		Domain:    "test.lab",
 		Interface: "eth0",
@@ -583,14 +602,33 @@ func TestConfig_EventsValidation(t *testing.T) {
 			RangeStart: "10.0.0.100",
 			RangeEnd:   "10.0.0.200",
 			Gateway:    "10.0.0.1",
+			DefaultTTL: Duration(5 * time.Minute),
+			StaticTTL:  Duration(24 * time.Hour),
+			LeaseFile:  "/tmp/leases.json",
+		},
+		DNS: DNSConfig{
+			Listen: ":53",
+			NameFormat: NameFormatCfg{
+				WithHostname: "{{.Hostname}}.{{.Domain}}",
+				Fallback:     "dhcp-{{.IP4}}.{{.Domain}}",
+			},
+		},
+		Upstream: UpstreamConfig{
+			DOHURL:          "https://1.1.1.1/dns-query",
+			FallbackServers: []string{"8.8.8.8:53"},
+			CacheMaxEntries: 1000,
+			CacheDB:         "/tmp/cache.db",
 		},
 		Events: EventsConfig{
-			PerHostLimit: 0, // Invalid
+			PerHostLimit: 0, // Invalid — should fail validation
 			Persist:      false,
+		},
+		Logging: LoggingConfig{
+			Level:  "info",
+			Format: "text",
 		},
 	}
 
-	cfg.SetDefaults()
 	err := cfg.Validate()
 	if err == nil {
 		t.Error("expected error for invalid per_host_limit")
@@ -598,6 +636,7 @@ func TestConfig_EventsValidation(t *testing.T) {
 }
 
 func TestConfig_PersistentEventsWithoutDB(t *testing.T) {
+	// Don't call SetDefaults() — it would fill in a default DB path.
 	cfg := &Config{
 		Domain:    "test.lab",
 		Interface: "eth0",
@@ -606,15 +645,34 @@ func TestConfig_PersistentEventsWithoutDB(t *testing.T) {
 			RangeStart: "10.0.0.100",
 			RangeEnd:   "10.0.0.200",
 			Gateway:    "10.0.0.1",
+			DefaultTTL: Duration(5 * time.Minute),
+			StaticTTL:  Duration(24 * time.Hour),
+			LeaseFile:  "/tmp/leases.json",
+		},
+		DNS: DNSConfig{
+			Listen: ":53",
+			NameFormat: NameFormatCfg{
+				WithHostname: "{{.Hostname}}.{{.Domain}}",
+				Fallback:     "dhcp-{{.IP4}}.{{.Domain}}",
+			},
+		},
+		Upstream: UpstreamConfig{
+			DOHURL:          "https://1.1.1.1/dns-query",
+			FallbackServers: []string{"8.8.8.8:53"},
+			CacheMaxEntries: 1000,
+			CacheDB:         "/tmp/cache.db",
 		},
 		Events: EventsConfig{
 			PerHostLimit: 100,
 			Persist:      true,
-			DB:           "", // Missing DB path
+			DB:           "", // Missing DB path — should fail validation
+		},
+		Logging: LoggingConfig{
+			Level:  "info",
+			Format: "text",
 		},
 	}
 
-	cfg.SetDefaults()
 	err := cfg.Validate()
 	if err == nil {
 		t.Error("expected error for persistent events without DB path")

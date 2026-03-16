@@ -168,6 +168,23 @@ jobs:
       - name: Generate coverage
         run: go test -race -coverprofile=coverage.out ./...
 
+      - name: Coverage summary
+        run: |
+          echo "### Coverage Report" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          go tool cover -func=coverage.out | tail -20 >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+      - name: Check coverage threshold
+        run: |
+          TOTAL=$(go tool cover -func=coverage.out | tail -1 | awk '{print $NF}' | tr -d '%')
+          THRESHOLD=40
+          echo "Total coverage: ${TOTAL}% (threshold: ${THRESHOLD}%)"
+          if [ "$(echo "${TOTAL} < ${THRESHOLD}" | bc -l)" -eq 1 ]; then
+            echo "::error::Coverage ${TOTAL}% is below threshold ${THRESHOLD}%"
+            exit 1
+          fi
+
       - name: Upload coverage artifact
         uses: actions/upload-artifact@v4
         with:

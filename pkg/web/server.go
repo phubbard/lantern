@@ -6,8 +6,9 @@ import (
 	"fmt"
 	"html/template"
 	"log/slog"
+	"net"
 	"net/http"
-	"strings"
+	"time"
 
 	"github.com/phubbard/lantern/pkg/blocker"
 	"github.com/phubbard/lantern/pkg/config"
@@ -56,9 +57,8 @@ func New(cfg *config.Config, pool *model.LeasePool, m *metrics.Collector, e *eve
 	mux.HandleFunc("POST /api/static", s.handleAddStatic)
 	mux.HandleFunc("DELETE /api/static/{mac}", s.handleDeleteStatic)
 
-	addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
 	s.httpSrv = &http.Server{
-		Addr:    addr,
+		Addr:    cfg.Web.Listen,
 		Handler: mux,
 	}
 
@@ -100,7 +100,7 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 
 // handleLeases serves the leases table page.
 func (s *Server) handleLeases(w http.ResponseWriter, r *http.Request) {
-	leases := s.pool.All()
+	leases := s.pool.GetAllLeases()
 	page := baseLayout(
 		"Leases",
 		leasesContent(),
@@ -115,9 +115,14 @@ func (s *Server) handleLeases(w http.ResponseWriter, r *http.Request) {
 
 // handleLeaseDetail serves the lease detail page for a specific MAC address.
 func (s *Server) handleLeaseDetail(w http.ResponseWriter, r *http.Request) {
-	mac := r.PathValue("mac")
-	lease, ok := s.pool.Get(mac)
-	if !ok {
+	macStr := r.PathValue("mac")
+	parsedMAC, err := net.ParseMAC(macStr)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	lease := s.pool.FindByMAC(parsedMAC)
+	if lease == nil {
 		http.NotFound(w, r)
 		return
 	}
@@ -176,7 +181,7 @@ func (s *Server) handleAPIMetrics(w http.ResponseWriter, r *http.Request) {
 
 // handleAPILeases returns all leases as JSON.
 func (s *Server) handleAPILeases(w http.ResponseWriter, r *http.Request) {
-	leases := s.pool.All()
+	leases := s.pool.GetAllLeases()
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(leases)
 }
@@ -541,7 +546,7 @@ func leaseDetailContent() *template.Template {
         </tr>
         <tr>
             <td style="font-weight: bold; padding-right: 2rem;">Leased At:</td>
-            <td>{{.LeasedAt.Format "2006-01-02 15:04:05"}}</td>
+            <td>{{.GrantedAt.Format "2006-01-02 15:04:05"}}</td>
         </tr>
         <tr>
             <td style="font-weight: bold; padding-right: 2rem;">Expires At:</td>

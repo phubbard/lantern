@@ -58,11 +58,11 @@ func getMACAddress(ifaceName string) (net.HardwareAddr, error) {
 
 // sendDHCPDiscover sends a DHCP DISCOVER message and waits for OFFER
 func sendDHCPDiscover(clientMAC net.HardwareAddr, hostname string) (*dhcpv4.DHCPv4, error) {
-	// Create DISCOVER packet using the convenient constructor
+	// Create DISCOVER packet
 	discover, err := dhcpv4.New(
-		dhcpv4.WithClientMAC(clientMAC),
+		dhcpv4.WithHwAddr(clientMAC),
 		dhcpv4.WithBroadcast(true),
-		dhcpv4.WithOption(dhcpv4.OptMessageType(dhcpv4.MessageTypeDiscover)),
+		dhcpv4.WithMessageType(dhcpv4.MessageTypeDiscover),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create DISCOVER packet: %w", err)
@@ -80,7 +80,7 @@ func sendDHCPDiscover(clientMAC net.HardwareAddr, hostname string) (*dhcpv4.DHCP
 	}
 	defer listenConn.Close()
 
-	// Set socket to allow broadcast
+	// Set read deadline
 	listenConn.SetReadDeadline(time.Now().Add(dhcpTimeout))
 
 	// Send the packet via broadcast
@@ -97,7 +97,7 @@ func sendDHCPDiscover(clientMAC net.HardwareAddr, hostname string) (*dhcpv4.DHCP
 
 	// Read response
 	buf := make([]byte, 4096)
-	n, _, err := listenConn.ReadFromUDP(nil)
+	n, _, err := listenConn.ReadFromUDP(buf)
 	if err != nil {
 		return nil, fmt.Errorf("failed to receive OFFER: %w", err)
 	}
@@ -114,7 +114,7 @@ func sendDHCPDiscover(clientMAC net.HardwareAddr, hostname string) (*dhcpv4.DHCP
 func sendDHCPRequest(clientMAC net.HardwareAddr, offerIP net.IP, serverIP net.IP, xid dhcpv4.TransactionID, clientIP net.IP) (*dhcpv4.DHCPv4, error) {
 	// Create REQUEST packet
 	request, err := dhcpv4.New(
-		dhcpv4.WithClientMAC(clientMAC),
+		dhcpv4.WithHwAddr(clientMAC),
 		dhcpv4.WithBroadcast(true),
 		dhcpv4.WithTransactionID(xid),
 	)
@@ -150,7 +150,7 @@ func sendDHCPRequest(clientMAC net.HardwareAddr, offerIP net.IP, serverIP net.IP
 
 	// Read response
 	buf := make([]byte, 4096)
-	n, _, err := listenConn.ReadFromUDP(nil)
+	n, _, err := listenConn.ReadFromUDP(buf)
 	if err != nil {
 		return nil, fmt.Errorf("failed to receive ACK: %w", err)
 	}
@@ -209,8 +209,8 @@ func verifyPTRResolution(serverIP net.IP, ip net.IP, expectedHostname string) er
 
 // validateOffer checks that an OFFER message has required fields
 func validateOffer(offer *dhcpv4.DHCPv4) error {
-	if offer.YourClientIP == nil {
-		return fmt.Errorf("OFFER missing YourClientIP")
+	if offer.YourIPAddr == nil || offer.YourIPAddr.IsUnspecified() {
+		return fmt.Errorf("OFFER missing YourIPAddr")
 	}
 
 	msgType := offer.MessageType()
@@ -222,11 +222,11 @@ func validateOffer(offer *dhcpv4.DHCPv4) error {
 		return fmt.Errorf("OFFER missing SubnetMask")
 	}
 
-	if offer.Router() == nil {
+	if len(offer.Router()) == 0 {
 		return fmt.Errorf("OFFER missing Router")
 	}
 
-	if offer.DNS() == nil {
+	if len(offer.DNS()) == 0 {
 		return fmt.Errorf("OFFER missing DNS Servers")
 	}
 
@@ -235,8 +235,8 @@ func validateOffer(offer *dhcpv4.DHCPv4) error {
 
 // validateACK checks that an ACK message has required fields
 func validateACK(ack *dhcpv4.DHCPv4) error {
-	if ack.YourClientIP == nil {
-		return fmt.Errorf("ACK missing YourClientIP")
+	if ack.YourIPAddr == nil || ack.YourIPAddr.IsUnspecified() {
+		return fmt.Errorf("ACK missing YourIPAddr")
 	}
 
 	msgType := ack.MessageType()
@@ -244,7 +244,8 @@ func validateACK(ack *dhcpv4.DHCPv4) error {
 		return fmt.Errorf("expected MessageType Ack, got %v", msgType)
 	}
 
-	if ack.IPAddressLeaseTime() == 0 {
+	leaseTime := ack.Options.Get(dhcpv4.OptionIPAddressLeaseTime)
+	if leaseTime == nil {
 		return fmt.Errorf("ACK missing IP Address Lease Time")
 	}
 
@@ -326,10 +327,10 @@ func main() {
 		if err != nil {
 			results.printFail("DHCP: DISCOVER → OFFER", err.Error())
 		} else {
-			if !isIPInRange(offer.YourClientIP, "172.30.0.100", "172.30.0.250") {
-				results.printFail("DHCP: DISCOVER → OFFER", fmt.Sprintf("offered IP %s not in DHCP range", offer.YourClientIP))
+			if !isIPInRange(offer.YourIPAddr, "172.30.0.100", "172.30.0.250") {
+				results.printFail("DHCP: DISCOVER → OFFER", fmt.Sprintf("offered IP %s not in DHCP range", offer.YourIPAddr))
 			} else {
-				results.printPass("DHCP: DISCOVER → OFFER (IP: " + offer.YourClientIP.String() + ")")
+				results.printPass("DHCP: DISCOVER → OFFER (IP: " + offer.YourIPAddr.String() + ")")
 			}
 		}
 	}
@@ -344,7 +345,7 @@ func main() {
 
 	// Test 2: REQUEST → ACK
 	fmt.Println("Test 2: Send REQUEST, receive ACK...")
-	ack, err := sendDHCPRequest(clientMAC, offer.YourClientIP, serverIP, offer.TransactionID, offer.YourClientIP)
+	ack, err := sendDHCPRequest(clientMAC, offer.YourIPAddr, serverIP, offer.TransactionID, offer.YourIPAddr)
 	if err != nil {
 		results.printFail("DHCP: REQUEST → ACK", err.Error())
 	} else {
@@ -352,15 +353,15 @@ func main() {
 		if err != nil {
 			results.printFail("DHCP: REQUEST → ACK", err.Error())
 		} else {
-			if !ack.YourClientIP.Equal(offer.YourClientIP) {
-				results.printFail("DHCP: REQUEST → ACK", fmt.Sprintf("ACK IP %s differs from OFFER IP %s", ack.YourClientIP, offer.YourClientIP))
+			if !ack.YourIPAddr.Equal(offer.YourIPAddr) {
+				results.printFail("DHCP: REQUEST → ACK", fmt.Sprintf("ACK IP %s differs from OFFER IP %s", ack.YourIPAddr, offer.YourIPAddr))
 			} else {
-				results.printPass("DHCP: REQUEST → ACK (IP: " + ack.YourClientIP.String() + ")")
+				results.printPass("DHCP: REQUEST → ACK (IP: " + ack.YourIPAddr.String() + ")")
 			}
 		}
 	}
 
-	assignedIP := offer.YourClientIP
+	assignedIP := offer.YourIPAddr
 
 	// Test 3: DISCOVER with hostname
 	fmt.Println("Test 3: Send DISCOVER with hostname...")
@@ -372,7 +373,7 @@ func main() {
 		if err != nil {
 			results.printFail("DHCP: DISCOVER with hostname", err.Error())
 		} else {
-			results.printPass("DHCP: DISCOVER with hostname (IP: " + offer2.YourClientIP.String() + ")")
+			results.printPass("DHCP: DISCOVER with hostname (IP: " + offer2.YourIPAddr.String() + ")")
 		}
 	}
 

@@ -70,34 +70,34 @@ func (r *Resolver) Resolve(ctx context.Context, msg *dns.Msg) (*dns.Msg, string,
 	// Step 1: Check cache
 	if cachedResponse, found := r.lookupCache(name, qtype); found {
 		r.logger.Debug("cache hit", "name", name, "type", dns.TypeToString[qtype])
-		r.metrics.RecordCacheHit(name, qtype)
+		r.metrics.IncCacheHits()
 		return cachedResponse, "cache", nil
 	}
 
 	// Step 2: Try DoH
-	if r.cfg.Upstream.DoHURL != "" {
+	if r.cfg.Upstream.DOHURL != "" {
 		response, err := r.resolveDoH(ctx, msg)
 		if err == nil {
 			r.logger.Debug("resolved via DoH", "name", name, "type", dns.TypeToString[qtype])
 			r.cacheResponse(response)
-			r.metrics.RecordUpstreamSuccess("doh", name, qtype)
+			r.metrics.IncQueriesUpstream()
 			return response, "upstream_doh", nil
 		}
 		r.logger.Debug("DoH resolution failed", "name", name, "type", dns.TypeToString[qtype], "err", err)
-		r.metrics.RecordUpstreamFailure("doh", name, qtype)
+		r.metrics.IncCacheMisses()
 	}
 
 	// Step 3: Try fallback servers
-	for _, server := range r.cfg.Upstream.Fallback {
+	for _, server := range r.cfg.Upstream.FallbackServers {
 		response, err := r.resolvePlainDNS(ctx, msg, server)
 		if err == nil {
 			r.logger.Debug("resolved via fallback", "name", name, "type", dns.TypeToString[qtype], "server", server)
 			r.cacheResponse(response)
-			r.metrics.RecordUpstreamSuccess("fallback", name, qtype)
+			r.metrics.IncQueriesUpstream()
 			return response, "upstream_fallback", nil
 		}
 		r.logger.Debug("fallback resolution failed", "server", server, "name", name, "type", dns.TypeToString[qtype], "err", err)
-		r.metrics.RecordUpstreamFailure("fallback", name, qtype)
+		r.metrics.IncCacheMisses()
 	}
 
 	// Step 4: Return SERVFAIL if all resolution methods fail
@@ -117,7 +117,7 @@ func (r *Resolver) resolveDoH(ctx context.Context, msg *dns.Msg) (*dns.Msg, erro
 	}
 
 	// Create HTTP request with context
-	req, err := http.NewRequestWithContext(ctx, "POST", r.cfg.Upstream.DoHURL, bytes.NewReader(msgBytes))
+	req, err := http.NewRequestWithContext(ctx, "POST", r.cfg.Upstream.DOHURL, bytes.NewReader(msgBytes))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create DoH request: %w", err)
 	}

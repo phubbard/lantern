@@ -1,5 +1,5 @@
 .PHONY: all build clean test test-unit test-protocol test-integration test-docker lint generate \
-       coverage docker docker-build docker-run docker-test fmt vet install deps
+       coverage coverage-func coverage-check docker docker-build docker-run docker-test fmt vet install deps
 
 BINARY    := lantern
 VERSION   := $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
@@ -51,6 +51,21 @@ coverage:
 	go test -race -coverprofile=coverage.out ./...
 	go tool cover -html=coverage.out -o coverage.html
 	@echo "Coverage report: coverage.html"
+	@go tool cover -func=coverage.out | tail -1
+
+coverage-func:
+	go test -race -coverprofile=coverage.out ./...
+	@go tool cover -func=coverage.out
+
+coverage-check: coverage
+	@TOTAL=$$(go tool cover -func=coverage.out | tail -1 | awk '{print $$NF}' | tr -d '%'); \
+	THRESHOLD=40; \
+	echo "Total coverage: $${TOTAL}% (threshold: $${THRESHOLD}%)"; \
+	if [ $$(echo "$${TOTAL} < $${THRESHOLD}" | bc -l) -eq 1 ]; then \
+		echo "FAIL: coverage below $${THRESHOLD}%"; exit 1; \
+	else \
+		echo "PASS: coverage meets threshold"; \
+	fi
 
 bench:
 	go test -bench=. -benchmem ./...
@@ -122,7 +137,9 @@ help:
 	@echo "  test-unit      Run unit tests only (netutil, model, blocker, config)"
 	@echo "  test-protocol  Run protocol tests (dns, cache)"
 	@echo "  test-short     Run tests in short mode (skip slow tests)"
-	@echo "  coverage       Generate HTML coverage report"
+	@echo "  coverage       Generate HTML coverage report + summary line"
+	@echo "  coverage-func  Show per-function coverage breakdown"
+	@echo "  coverage-check Coverage with 40% threshold gate"
 	@echo "  bench          Run benchmarks"
 	@echo "  lint           Run golangci-lint"
 	@echo "  check          Run fmt + vet + lint + test"

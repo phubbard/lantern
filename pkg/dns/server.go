@@ -18,9 +18,9 @@ import (
 // Zone holds the local DNS zone data
 type Zone struct {
 	mu      sync.RWMutex
-	domain  string                 // e.g. "home.lab."
-	records map[string][]dns.RR    // forward records (A, TXT) keyed by FQDN
-	reverse map[string]*dns.PTR    // reverse records keyed by in-addr.arpa name
+	domain  string              // e.g. "home.lab."
+	records map[string][]dns.RR // forward records (A, TXT) keyed by FQDN
+	reverse map[string]*dns.PTR // reverse records keyed by in-addr.arpa name
 }
 
 // NewZone creates a new Zone with the given domain
@@ -82,10 +82,9 @@ func (z *Zone) UpdateFromLease(lease *model.Lease) {
 
 	// Create/update TXT record if fingerprint exists
 	if lease.Fingerprint != nil && lease.Fingerprint.OS != "" {
-		txtValue := fmt.Sprintf("os=%s;type=%s;vendor=%s",
+		txtValue := fmt.Sprintf("os=%s;type=%s",
 			lease.Fingerprint.OS,
 			lease.Fingerprint.DeviceType,
-			lease.Fingerprint.Vendor,
 		)
 		rrTXT := &dns.TXT{
 			Hdr: dns.RR_Header{
@@ -140,7 +139,7 @@ func (z *Zone) Lookup(name string, qtype uint16) []dns.RR {
 	defer z.mu.RUnlock()
 
 	// Normalize name to FQDN
-	if name[len(name)-1] != '.' {
+	if len(name) > 0 && name[len(name)-1] != '.' {
 		name = name + "."
 	}
 
@@ -186,14 +185,17 @@ func (z *Zone) Lookup(name string, qtype uint16) []dns.RR {
 
 // ReverseIP converts an IP address to in-addr.arpa format
 // 192.168.1.42 -> "42.1.168.192.in-addr.arpa."
-// 2001:db8::1 -> "1.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.8.b.d.0.1.0.0.2.ip6.arpa."
 func (z *Zone) ReverseIP(ip net.IP) string {
 	if ipv4 := ip.To4(); ipv4 != nil {
 		return fmt.Sprintf("%d.%d.%d.%d.in-addr.arpa.", ipv4[3], ipv4[2], ipv4[1], ipv4[0])
 	}
 
 	// IPv6 reverse
-	return dns.ReverseAddr(ip)
+	rev, err := dns.ReverseAddr(ip.String())
+	if err != nil {
+		return ""
+	}
+	return rev
 }
 
 // buildSOA creates an SOA record for the local zone
@@ -254,9 +256,16 @@ type Server struct {
 // New creates a new DNS server with the given configuration and dependencies
 func New(cfg *config.Config, upstream Resolver, blocker Blocker, m *metrics.Collector, e *events.Store) *Server {
 	logger := slog.Default()
+
+	// Use domain with trailing dot for zone
+	zoneDomain := cfg.Domain
+	if len(zoneDomain) > 0 && zoneDomain[len(zoneDomain)-1] != '.' {
+		zoneDomain = zoneDomain + "."
+	}
+
 	return &Server{
 		cfg:      cfg,
-		zone:     NewZone(cfg.DNS.Zone),
+		zone:     NewZone(zoneDomain),
 		upstream: upstream,
 		blocker:  blocker,
 		metrics:  m,
@@ -283,20 +292,18 @@ func (s *Server) Start(ctx context.Context) error {
 
 	// Create UDP server
 	s.udpServer = &dns.Server{
-		Addr:       addr,
-		Net:        "udp",
-		Handler:    dns.DefaultServeMux,
-		ReusePort:  true,
-		MaxTCPConnections: -1,
+		Addr:      addr,
+		Net:       "udp",
+		Handler:   dns.DefaultServeMux,
+		ReusePort: true,
 	}
 
 	// Create TCP server
 	s.tcpServer = &dns.Server{
-		Addr:       addr,
-		Net:        "tcp",
-		Handler:    dns.DefaultServeMux,
-		ReusePort:  true,
-		MaxTCPConnections: -1,
+		Addr:      addr,
+		Net:       "tcp",
+		Handler:   dns.DefaultServeMux,
+		ReusePort: true,
 	}
 
 	// Start UDP server in a goroutine
@@ -344,7 +351,7 @@ func (s *Server) handleQuery(w dns.ResponseWriter, r *dns.Msg) {
 	// Extract question
 	if len(r.Question) == 0 {
 		// Invalid query, return as-is with no questions
-		dns.WriteMsg(w, r)
+		_ = w.WriteMsg(r)
 		return
 	}
 
@@ -358,14 +365,15 @@ func (s *Server) handleQuery(w dns.ResponseWriter, r *dns.Msg) {
 	if s.blocker != nil && s.blocker.IsBlocked(qname) {
 		s.logger.Debug("Query blocked by blocklist", "name", qname)
 		blocked := s.buildBlockedResponse(r)
-		s.metrics.RecordQuery(qname, qtype, "blocked", time.Since(start))
-		s.events.Record(&events.DNSEvent{
-			Name:      qname,
-			Type:      dns.TypeToString[qtype],
-			Source:    "blocked",
+		s.metrics.IncQueriesTotal()
+		s.metrics.IncQueriesBlocked()
+		s.metrics.RecordLatency(metrics.SourceBlocked, time.Since(start))
+		s.events.Record(model.HostEvent{
 			Timestamp: time.Now(),
+			Type:      model.EventDNSQuery,
+			Detail:    fmt.Sprintf("name=%s type=%s source=blocked", qname, dns.TypeToString[qtype]),
 		})
-		dns.WriteMsg(w, blocked)
+		_ = w.WriteMsg(blocked)
 		return
 	}
 
@@ -374,42 +382,15 @@ func (s *Server) handleQuery(w dns.ResponseWriter, r *dns.Msg) {
 	if len(records) > 0 {
 		s.logger.Debug("Query answered from local zone", "name", qname, "records", len(records))
 		resp := s.buildLocalResponse(r, records)
-		s.metrics.RecordQuery(qname, qtype, "local", time.Since(start))
-		s.events.Record(&events.DNSEvent{
-			Name:      qname,
-			Type:      dns.TypeToString[qtype],
-			Source:    "local",
+		s.metrics.IncQueriesTotal()
+		s.metrics.IncQueriesLocal()
+		s.metrics.RecordLatency(metrics.SourceLocal, time.Since(start))
+		s.events.Record(model.HostEvent{
 			Timestamp: time.Now(),
+			Type:      model.EventDNSQuery,
+			Detail:    fmt.Sprintf("name=%s type=%s source=local", qname, dns.TypeToString[qtype]),
 		})
-		dns.WriteMsg(w, resp)
-		return
-	}
-
-	// Check for SOA query on zone apex
-	if qtype == dns.TypeSOA && (qname == s.zone.domain || qname == ".") {
-		resp := s.buildLocalResponse(r, []dns.RR{s.zone.buildSOA()})
-		s.metrics.RecordQuery(qname, qtype, "local", time.Since(start))
-		s.events.Record(&events.DNSEvent{
-			Name:      qname,
-			Type:      dns.TypeToString[qtype],
-			Source:    "local",
-			Timestamp: time.Now(),
-		})
-		dns.WriteMsg(w, resp)
-		return
-	}
-
-	// Check for NS query on zone apex
-	if qtype == dns.TypeNS && (qname == s.zone.domain || qname == ".") {
-		resp := s.buildLocalResponse(r, []dns.RR{s.zone.buildNS()})
-		s.metrics.RecordQuery(qname, qtype, "local", time.Since(start))
-		s.events.Record(&events.DNSEvent{
-			Name:      qname,
-			Type:      dns.TypeToString[qtype],
-			Source:    "local",
-			Timestamp: time.Now(),
-		})
-		dns.WriteMsg(w, resp)
+		_ = w.WriteMsg(resp)
 		return
 	}
 
@@ -423,26 +404,26 @@ func (s *Server) handleQuery(w dns.ResponseWriter, r *dns.Msg) {
 		// Return SERVFAIL
 		resp = r.Copy()
 		resp.SetRcode(r, dns.RcodeServerFailure)
-		s.metrics.RecordQuery(qname, qtype, "error", time.Since(start))
-		s.events.Record(&events.DNSEvent{
-			Name:      qname,
-			Type:      dns.TypeToString[qtype],
-			Source:    "error",
+		s.metrics.IncQueriesTotal()
+		s.events.Record(model.HostEvent{
 			Timestamp: time.Now(),
+			Type:      model.EventDNSQuery,
+			Detail:    fmt.Sprintf("name=%s type=%s source=error err=%s", qname, dns.TypeToString[qtype], err),
 		})
-		dns.WriteMsg(w, resp)
+		_ = w.WriteMsg(resp)
 		return
 	}
 
 	s.logger.Debug("Query answered from upstream", "name", qname, "source", source)
-	s.metrics.RecordQuery(qname, qtype, source, time.Since(start))
-	s.events.Record(&events.DNSEvent{
-		Name:      qname,
-		Type:      dns.TypeToString[qtype],
-		Source:    source,
+	s.metrics.IncQueriesTotal()
+	s.metrics.IncQueriesUpstream()
+	s.metrics.RecordLatency(metrics.SourceUpstreamDoH, time.Since(start))
+	s.events.Record(model.HostEvent{
 		Timestamp: time.Now(),
+		Type:      model.EventDNSQuery,
+		Detail:    fmt.Sprintf("name=%s type=%s source=%s", qname, dns.TypeToString[qtype], source),
 	})
-	dns.WriteMsg(w, resp)
+	_ = w.WriteMsg(resp)
 }
 
 // buildBlockedResponse builds a DNS response for blocked queries
