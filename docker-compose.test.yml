@@ -1,0 +1,78 @@
+# Integration test environment for Lantern
+# Usage: docker compose -f docker-compose.test.yml up --build --abort-on-container-exit
+#
+# Architecture:
+#   lantern-server: runs the Lantern binary with a test config
+#   test-dns:       exercises DNS resolution and web API
+#   test-dhcp:      exercises DHCP protocol with raw packets
+#
+# Network: isolated bridge (172.30.0.0/24)
+#   Server: 172.30.0.2 (static)
+#   DHCP pool: 172.30.0.100-250 (outside Docker IPAM range)
+
+services:
+  lantern-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: lantern-test-server
+    networks:
+      testnet:
+        ipv4_address: 172.30.0.2
+    cap_add:
+      - NET_BIND_SERVICE
+      - NET_RAW
+      - NET_ADMIN
+    volumes:
+      - ./test/integration/config.test.json:/etc/lantern/config.json:ro
+    command: ["serve", "-c", "/etc/lantern/config.json"]
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:8080/"]
+      interval: 2s
+      timeout: 3s
+      retries: 15
+      start_period: 5s
+
+  test-dns:
+    build:
+      context: ./test/integration
+      dockerfile: Dockerfile.client
+    container_name: lantern-test-dns
+    depends_on:
+      lantern-server:
+        condition: service_healthy
+    networks:
+      testnet:
+    cap_add:
+      - NET_RAW
+    environment:
+      - LANTERN_SERVER=172.30.0.2
+      - TEST_SUITE=dns
+    command: ["/tests/run_tests.sh", "dns"]
+
+  test-dhcp:
+    build:
+      context: .
+      dockerfile: test/integration/Dockerfile.dhcpclient
+    container_name: lantern-test-dhcp
+    depends_on:
+      lantern-server:
+        condition: service_healthy
+    networks:
+      testnet:
+    cap_add:
+      - NET_RAW
+      - NET_ADMIN
+    environment:
+      - LANTERN_SERVER=172.30.0.2
+      - TEST_SUITE=dhcp
+    command: ["/tests/run_tests.sh", "dhcp"]
+
+networks:
+  testnet:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.30.0.0/24
+          gateway: 172.30.0.1
+          ip_range: 172.30.0.2/28  # Docker IPAM only uses .2-.15

@@ -1,0 +1,42 @@
+{
+  "domain": "test.lantern",
+  "interface": "eth0",
+  "dhcp": {
+    "subnet": "172.30.0.0/24",
+    "range_start": "172.30.0.100",
+    "range_end": "172.30.0.250",
+    "gateway": "172.30.0.1",
+    "dns_servers": ["172.30.0.2"],
+    "default_ttl": "5m",
+    "static_ttl": "24h",
+    "lease_file": "/var/lib/lantern/leases.json"
+  },
+  "dns": {
+    "listen": ":53"
+  },
+  "upstream": {
+    "doh_url": "https://1.1.1.1/dns-query",
+    "fallback_servers": ["8.8.8.8:53", "1.1.1.1:53"],
+    "cache_max_entries": 1000,
+    "cache_db": "/var/lib/lantern/cache.db"
+  },
+  "blocklists": [],
+  "static_hosts": [
+    { "mac": "02:42:ac:1e:00:99", "ip": "172.30.0.50", "name": "testbox" }
+  ],
+  "fingerprint": {
+    "enabled": false
+  },
+  "web": {
+    "enabled": true,
+    "listen": ":8080"
+  },
+  "events": {
+    "per_host_limit": 50,
+    "persist": false
+  },
+  "logging": {
+    "level": "debug",
+    "format": "text"
+  }
+}

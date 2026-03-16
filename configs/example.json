@@ -1,0 +1,61 @@
+{
+  "domain": "home.lab",
+  "interface": "eth0",
+
+  "dhcp": {
+    "subnet": "192.168.1.0/24",
+    "range_start": "192.168.1.100",
+    "range_end": "192.168.1.250",
+    "gateway": "192.168.1.1",
+    "dns_servers": ["192.168.1.2"],
+    "default_ttl": "5m",
+    "static_ttl": "24h",
+    "lease_file": "/var/lib/lantern/leases.json"
+  },
+
+  "dns": {
+    "listen": ":53",
+    "name_format": {
+      "with_hostname": "{hostname}.{domain}",
+      "fallback": "dhcp-{octet:03d}.{domain}"
+    }
+  },
+
+  "upstream": {
+    "doh_url": "https://1.1.1.1/dns-query",
+    "fallback_servers": ["8.8.8.8:53", "1.1.1.1:53"],
+    "cache_max_entries": 50000,
+    "cache_db": "/var/lib/lantern/cache.db"
+  },
+
+  "blocklists": [
+    { "path": "/etc/lantern/blocklists/adblock.hosts", "enabled": true }
+  ],
+
+  "static_hosts": [
+    { "mac": "aa:bb:cc:dd:ee:ff", "ip": "192.168.1.10", "name": "nas" },
+    { "mac": "11:22:33:44:55:66", "ip": "192.168.1.11", "name": "printer" }
+  ],
+
+  "fingerprint": {
+    "enabled": true,
+    "interface": "eth0",
+    "signatures_file": ""
+  },
+
+  "web": {
+    "enabled": true,
+    "listen": ":8080"
+  },
+
+  "events": {
+    "per_host_limit": 100,
+    "persist": true,
+    "db": "/var/lib/lantern/events.db"
+  },
+
+  "logging": {
+    "level": "info",
+    "format": "json"
+  }
+}

@@ -1,0 +1,4 @@
+# Test blocklist for integration tests
+0.0.0.0 ads.blocked.test
+0.0.0.0 tracker.blocked.test
+127.0.0.1 malware.blocked.test

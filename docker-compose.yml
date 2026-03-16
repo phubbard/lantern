@@ -1,0 +1,107 @@
+version: '3.8'
+
+services:
+  lantern:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        VERSION: latest
+        BUILD_DATE: ${BUILD_DATE:-}
+        VCS_REF: ${VCS_REF:-}
+
+    # CRITICAL: Use host network mode for DHCP functionality.
+    # DHCP requires broadcast packets on the LAN to discover and assign addresses.
+    # Host network mode allows the container to see and respond to broadcast traffic.
+    # This is the standard deployment mode for DHCP servers in Docker.
+    network_mode: host
+
+    # NOTE: For DNS-only deployments without DHCP, see the commented bridge-mode
+    # configuration section at the end of this file.
+
+    volumes:
+      # Configuration: mounted read-only
+      - ./configs/local.json:/etc/lantern/config.json:ro
+      # Runtime data: persistent storage for leases, cache, and events
+      - lantern-data:/var/lib/lantern
+
+    # Restart policy for production reliability
+    restart: unless-stopped
+
+    # Timezone configuration (set to Australian Eastern Time)
+    environment:
+      TZ: Australia/Melbourne
+
+    # Linux capabilities required for DHCP and DNS operations
+    cap_add:
+      - NET_BIND_SERVICE    # Bind to privileged ports (53, 67)
+      - NET_RAW             # Raw socket access for packet inspection
+      - NET_ADMIN           # Network administration for passive TCP fingerprinting
+
+    # Optional: Resource limits (adjust based on your network size)
+    # deploy:
+    #   resources:
+    #     limits:
+    #       cpus: '1'
+    #       memory: 512M
+    #     reservations:
+    #       cpus: '0.5'
+    #       memory: 256M
+
+    # Optional: Logging configuration
+    # logging:
+    #   driver: json-file
+    #   options:
+    #     max-size: '10m'
+    #     max-file: '3'
+
+volumes:
+  lantern-data:
+    driver: local
+
+# ============================================================================
+# COMMENTED: DNS-ONLY DEPLOYMENT (Bridge Network Mode)
+# ============================================================================
+# If you want to run lantern as DNS-only (without DHCP) using bridge networking,
+# use the configuration below instead of the host network setup above.
+# This allows port mapping and is suitable for environments where DHCP is not
+# needed or where host network mode is not available.
+#
+# services:
+#   lantern-dns-only:
+#     build:
+#       context: .
+#       dockerfile: Dockerfile
+#       args:
+#         VERSION: latest
+#         BUILD_DATE: ${BUILD_DATE:-}
+#         VCS_REF: ${VCS_REF:-}
+#
+#     # Bridge network mode with port mapping for DNS-only use
+#     ports:
+#       - "53:53/udp"       # DNS queries
+#       - "53:53/tcp"       # DNS over TCP
+#       - "8080:8080/tcp"   # Web UI
+#
+#     # Note: DHCP (port 67) is omitted in DNS-only mode
+#
+#     volumes:
+#       - ./configs/local.json:/etc/lantern/config.json:ro
+#       - lantern-data:/var/lib/lantern
+#
+#     restart: unless-stopped
+#
+#     environment:
+#       TZ: Australia/Melbourne
+#
+#     cap_add:
+#       - NET_BIND_SERVICE
+#
+#     # TCP fingerprinting is optional in DNS-only mode; NET_RAW not required if disabled
+#     # cap_add:
+#     #   - NET_RAW
+#     #   - NET_ADMIN
+#
+# volumes:
+#   lantern-data:
+#     driver: local

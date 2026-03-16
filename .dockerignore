@@ -1,0 +1,85 @@
+# Version control
+.git
+.gitignore
+.gitattributes
+
+# Build artifacts and binaries
+/bin/
+/build/
+/dist/
+*.exe
+*.dll
+*.so
+
+# Database and cache files
+*.db
+*.sqlite
+*.sqlite3
+cache.db
+leases.json
+events.db
+
+# Log files
+*.log
+logs/
+
+# Environment and configuration
+.env
+.env.local
+.env.*.local
+.env.example
+
+# Docker files (don't include in image context unnecessarily)
+docker-compose.override.yml
+Dockerfile.dev
+docker-compose.dev.yml
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+*.sublime-project
+*.sublime-workspace
+.editorconfig
+.code-workspace
+
+# Coverage and test artifacts
+coverage.out
+coverage.html
+*.cover
+.coverage
+htmlcov/
+
+# Go-specific
+.mod
+.sum.bak
+vendor/
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# Documentation (optional: exclude if too large)
+# docs/
+# README.md
+
+# CI/CD
+.github/
+.gitlab-ci.yml
+.travis.yml
+Jenkinsfile
+
+# Node modules (if any frontend build tools)
+node_modules/
+npm-debug.log
+yarn-error.log
+
+# Misc
+*.bak
+*.orig
+.DS_Store
+Thumbs.db
