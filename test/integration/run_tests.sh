@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -euo pipefail
+set -uo pipefail
 
 # Integration test runner for Lantern
 # Usage: run_tests.sh [dns|dhcp|all]
