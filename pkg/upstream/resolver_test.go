@@ -337,12 +337,12 @@ func TestExtractMinTTL_ZeroTTL(t *testing.T) {
 func TestExtractMinTTL_VeryHighTTL(t *testing.T) {
 	msg := new(dns.Msg)
 	msg.Answer = append(msg.Answer, &dns.A{
-		Hdr: dns.RR_Header{Ttl: 86400},
+		Hdr: dns.RR_Header{Ttl: 172800}, // 48 hours — should be capped to 24h
 		A:   net.ParseIP("1.2.3.4"),
 	})
 	ttl := extractMinTTL(msg)
-	if ttl != 3600 {
-		t.Errorf("expected capped TTL 3600, got %d", ttl)
+	if ttl != 86400 {
+		t.Errorf("expected capped TTL 86400, got %d", ttl)
 	}
 }
 

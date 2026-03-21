@@ -1,0 +1,32 @@
+[Unit]
+Description=Lantern DNS and DHCP server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+ExecStart=/usr/local/bin/lantern serve -c /etc/lantern/config.json --socket /var/run/lantern/lantern.sock
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=on-failure
+RestartSec=5
+LimitNOFILE=65536
+
+# Create runtime directories
+RuntimeDirectory=lantern
+StateDirectory=lantern
+
+# Security hardening
+ProtectSystem=strict
+ReadWritePaths=/var/lib/lantern /var/run/lantern /etc/lantern
+PrivateTmp=true
+NoNewPrivileges=true
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+
+# Capability for binding to port 53 and 67
+AmbientCapabilities=CAP_NET_BIND_SERVICE CAP_NET_RAW CAP_NET_BROADCAST
+
+[Install]
+WantedBy=multi-user.target

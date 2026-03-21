@@ -1,0 +1,61 @@
+{
+  "_comment": "Test network config — bind to second NIC for isolated testing with DHCP enabled",
+  "domain": "test.lantern",
+  "interface": "eth1",
+
+  "dhcp": {
+    "enabled": true,
+    "interface": "eth1",
+    "subnet": "10.99.0.0/24",
+    "range_start": "10.99.0.100",
+    "range_end": "10.99.0.200",
+    "gateway": "10.99.0.1",
+    "dns_servers": ["10.99.0.1"],
+    "default_ttl": "5m",
+    "static_ttl": "24h",
+    "lease_file": "/var/lib/lantern/test-leases.json"
+  },
+
+  "dns": {
+    "listen": "10.99.0.1:53",
+    "name_format": {
+      "with_hostname": "{hostname}.test.lantern",
+      "fallback": "dhcp-{octet:03d}.test.lantern"
+    }
+  },
+
+  "upstream": {
+    "doh_url": "https://1.1.1.1/dns-query",
+    "fallback_servers": ["8.8.8.8:53"],
+    "cache_max_entries": 10000,
+    "cache_db": "/var/lib/lantern/test-cache.db"
+  },
+
+  "blocklists": [
+    {
+      "url": "https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts",
+      "enabled": true,
+      "update_interval": "24h"
+    }
+  ],
+
+  "static_hosts": [],
+
+  "fingerprint": {
+    "enabled": false
+  },
+
+  "web": {
+    "enabled": true,
+    "listen": "10.99.0.1:8080"
+  },
+
+  "events": {
+    "per_host_limit": 100
+  },
+
+  "logging": {
+    "level": "debug",
+    "format": "text"
+  }
+}

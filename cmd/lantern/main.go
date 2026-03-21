@@ -153,58 +153,65 @@ func runServe(cmd *cobra.Command, args []string) error {
 	// 4. Create events store
 	eventsStore := events.NewStore(cfg.Events.PerHostLimit)
 
-	// 5. Parse CIDR and IP addresses from config
-	_, subnetIPNet, err := net.ParseCIDR(cfg.DHCP.Subnet)
-	if err != nil {
-		return fmt.Errorf("failed to parse DHCP subnet: %w", err)
-	}
+	// 5. Parse CIDR and IP addresses from config (if DHCP enabled)
+	var leasePool *model.LeasePool
+	dhcpEnabled := cfg.DHCP.IsEnabled()
 
-	rangeStart := net.ParseIP(cfg.DHCP.RangeStart)
-	if rangeStart == nil {
-		return fmt.Errorf("failed to parse DHCP range start: %s", cfg.DHCP.RangeStart)
-	}
-
-	rangeEnd := net.ParseIP(cfg.DHCP.RangeEnd)
-	if rangeEnd == nil {
-		return fmt.Errorf("failed to parse DHCP range end: %s", cfg.DHCP.RangeEnd)
-	}
-
-	// 6. Create lease pool from config
-	leasePool := model.NewLeasePool(
-		*subnetIPNet,
-		rangeStart,
-		rangeEnd,
-		cfg.Domain,
-		time.Duration(cfg.DHCP.DefaultTTL),
-		time.Duration(cfg.DHCP.StaticTTL),
-	)
-
-	// 7. Initialize static hosts from config into the lease pool
-	for _, staticHost := range cfg.StaticHosts {
-		mac, err := net.ParseMAC(staticHost.MAC)
+	if dhcpEnabled {
+		_, subnetIPNet, err := net.ParseCIDR(cfg.DHCP.Subnet)
 		if err != nil {
-			logger.Warn("failed to parse static host MAC", "mac", staticHost.MAC, "error", err)
-			continue
-		}
-		ip := net.ParseIP(staticHost.IP)
-		if ip == nil {
-			logger.Warn("failed to parse static host IP", "ip", staticHost.IP)
-			continue
+			return fmt.Errorf("failed to parse DHCP subnet: %w", err)
 		}
 
-		lease := &model.Lease{
-			MAC:       mac,
-			IP:        ip,
-			Hostname:  staticHost.Name,
-			DNSName:   leasePool.GenerateDNSName(&model.Lease{Hostname: staticHost.Name, IP: ip}, ""),
-			Static:    true,
-			TTL:       time.Duration(cfg.DHCP.StaticTTL),
-			GrantedAt: time.Now(),
-			ExpiresAt: time.Now().Add(time.Duration(cfg.DHCP.StaticTTL)),
+		rangeStart := net.ParseIP(cfg.DHCP.RangeStart)
+		if rangeStart == nil {
+			return fmt.Errorf("failed to parse DHCP range start: %s", cfg.DHCP.RangeStart)
 		}
-		if err := leasePool.SetStaticLease(lease); err != nil {
-			logger.Warn("failed to add static host", "mac", staticHost.MAC, "error", err)
+
+		rangeEnd := net.ParseIP(cfg.DHCP.RangeEnd)
+		if rangeEnd == nil {
+			return fmt.Errorf("failed to parse DHCP range end: %s", cfg.DHCP.RangeEnd)
 		}
+
+		// 6. Create lease pool from config
+		leasePool = model.NewLeasePool(
+			*subnetIPNet,
+			rangeStart,
+			rangeEnd,
+			cfg.Domain,
+			time.Duration(cfg.DHCP.DefaultTTL),
+			time.Duration(cfg.DHCP.StaticTTL),
+		)
+
+		// 7. Initialize static hosts from config into the lease pool
+		for _, staticHost := range cfg.StaticHosts {
+			mac, err := net.ParseMAC(staticHost.MAC)
+			if err != nil {
+				logger.Warn("failed to parse static host MAC", "mac", staticHost.MAC, "error", err)
+				continue
+			}
+			ip := net.ParseIP(staticHost.IP)
+			if ip == nil {
+				logger.Warn("failed to parse static host IP", "ip", staticHost.IP)
+				continue
+			}
+
+			lease := &model.Lease{
+				MAC:       mac,
+				IP:        ip,
+				Hostname:  staticHost.Name,
+				DNSName:   leasePool.GenerateDNSName(&model.Lease{Hostname: staticHost.Name, IP: ip}, ""),
+				Static:    true,
+				TTL:       time.Duration(cfg.DHCP.StaticTTL),
+				GrantedAt: time.Now(),
+				ExpiresAt: time.Now().Add(time.Duration(cfg.DHCP.StaticTTL)),
+			}
+			if err := leasePool.SetStaticLease(lease); err != nil {
+				logger.Warn("failed to add static host", "mac", staticHost.MAC, "error", err)
+			}
+		}
+	} else {
+		logger.Info("DHCP server disabled by config")
 	}
 
 	// 8. Create SQLite cache
@@ -259,26 +266,29 @@ func runServe(cmd *cobra.Command, args []string) error {
 	dnsServer := lanterndns.New(cfg, upstreamResolver, blockMgr, metricsCollector, eventsStore)
 
 	// 11b. Register static hosts in the DNS zone
-	for _, lease := range leasePool.GetAllLeases() {
-		if lease.Static {
-			dnsServer.Zone().UpdateFromLease(lease)
-			logger.Info("registered static host in DNS", "name", lease.DNSName, "ip", lease.IP)
+	if leasePool != nil {
+		for _, lease := range leasePool.GetAllLeases() {
+			if lease.Static {
+				dnsServer.Zone().UpdateFromLease(lease)
+				logger.Info("registered static host in DNS", "name", lease.DNSName, "ip", lease.IP)
+			}
 		}
 	}
 
 	// 12. Create DHCP server with onLease callback that updates the DNS zone
-	onLease := func(lease *model.Lease) {
-		logger.Info("new lease granted",
-			"mac", lease.MAC,
-			"ip", lease.IP,
-			"hostname", lease.Hostname,
-			"dns_name", lease.DNSName,
-		)
-		// Update DNS zone with the new lease
-		dnsServer.Zone().UpdateFromLease(lease)
+	var dhcpServer *dhcp.Server
+	if dhcpEnabled {
+		onLease := func(lease *model.Lease) {
+			logger.Info("new lease granted",
+				"mac", lease.MAC,
+				"ip", lease.IP,
+				"hostname", lease.Hostname,
+				"dns_name", lease.DNSName,
+			)
+			dnsServer.Zone().UpdateFromLease(lease)
+		}
+		dhcpServer = dhcp.New(cfg, leasePool, metricsCollector, eventsStore, onLease)
 	}
-
-	dhcpServer := dhcp.New(cfg, leasePool, metricsCollector, eventsStore, onLease)
 
 	// 13. Create web server if enabled
 	var webServer *web.Server
@@ -308,6 +318,9 @@ func runServe(cmd *cobra.Command, args []string) error {
 	})
 
 	ctrlServer.Handle("leases", func(params json.RawMessage) (any, error) {
+		if leasePool == nil {
+			return []interface{}{}, nil
+		}
 		return leasePool.GetAllLeases(), nil
 	})
 
@@ -413,11 +426,13 @@ func runServe(cmd *cobra.Command, args []string) error {
 		}
 	}()
 
-	go func() {
-		if err := dhcpServer.Start(ctx); err != nil {
-			logger.Error("DHCP server error", "error", err)
-		}
-	}()
+	if dhcpServer != nil {
+		go func() {
+			if err := dhcpServer.Start(ctx); err != nil {
+				logger.Error("DHCP server error", "error", err)
+			}
+		}()
+	}
 
 	go func() {
 		if err := ctrlServer.Start(ctx); err != nil {
@@ -475,10 +490,12 @@ shutdown:
 	if err := dnsServer.Stop(); err != nil {
 		logger.Error("DNS server stop error", "error", err)
 	}
-	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer shutdownCancel()
-	if err := dhcpServer.Stop(shutdownCtx); err != nil {
-		logger.Error("DHCP server stop error", "error", err)
+	if dhcpServer != nil {
+		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer shutdownCancel()
+		if err := dhcpServer.Stop(shutdownCtx); err != nil {
+			logger.Error("DHCP server stop error", "error", err)
+		}
 	}
 	// control server stops itself when ctx is cancelled (in Start)
 	if webServer != nil {
@@ -490,7 +507,7 @@ shutdown:
 
 	// 18. Save leases to disk
 	leaseFile := cfg.DHCP.LeaseFile
-	if leaseFile != "" {
+	if leaseFile != "" && leasePool != nil {
 		leaseDir := filepath.Dir(leaseFile)
 		if err := os.MkdirAll(leaseDir, 0700); err != nil {
 			logger.Error("failed to create lease directory", "error", err)

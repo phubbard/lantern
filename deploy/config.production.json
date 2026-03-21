@@ -1,0 +1,58 @@
+{
+  "domain": "phfactor.net",
+  "interface": "eth0",
+
+  "dhcp": {
+    "enabled": false
+  },
+
+  "dns": {
+    "listen": "0.0.0.0:53",
+    "name_format": {
+      "with_hostname": "{hostname}.{domain}",
+      "fallback": "dhcp-{octet:03d}.{domain}"
+    }
+  },
+
+  "upstream": {
+    "doh_url": "https://1.1.1.1/dns-query",
+    "fallback_servers": ["8.8.8.8:53", "1.1.1.1:53"],
+    "cache_max_entries": 50000,
+    "cache_hot_set_size": 5000,
+    "cache_db": "/var/lib/lantern/cache.db"
+  },
+
+  "blocklists": [
+    {
+      "url": "https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts",
+      "enabled": true,
+      "update_interval": "24h"
+    },
+    {
+      "url": "https://adaway.org/hosts.txt",
+      "enabled": true,
+      "update_interval": "24h"
+    }
+  ],
+
+  "static_hosts": [],
+
+  "fingerprint": {
+    "enabled": false
+  },
+
+  "web": {
+    "enabled": true,
+    "listen": "0.0.0.0:8080"
+  },
+
+  "events": {
+    "per_host_limit": 500,
+    "persist": false
+  },
+
+  "logging": {
+    "level": "info",
+    "format": "json"
+  }
+}

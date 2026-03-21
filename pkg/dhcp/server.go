@@ -47,7 +47,11 @@ func New(cfg *config.Config, pool *model.LeasePool, m *metrics.Collector, e *eve
 
 // Start begins listening on UDP port 67 for DHCP requests.
 func (s *Server) Start(ctx context.Context) error {
-	s.logger.InfoContext(ctx, "starting DHCP server", "port", 67, "interface", s.cfg.Interface)
+	iface := s.cfg.DHCP.Interface
+	if iface == "" {
+		iface = s.cfg.Interface
+	}
+	s.logger.InfoContext(ctx, "starting DHCP server", "port", 67, "interface", iface)
 
 	// Load existing leases from disk if available
 	if err := s.LoadLeases(); err != nil {
@@ -64,7 +68,7 @@ func (s *Server) Start(ctx context.Context) error {
 	// Create the DHCP server with our handler
 	laddr := &net.UDPAddr{IP: net.IPv4zero, Port: 67}
 	srv, err := server4.NewServer(
-		s.cfg.Interface,
+		iface,
 		laddr,
 		s.handler,
 	)

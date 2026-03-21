@@ -53,6 +53,8 @@ type Config struct {
 
 // DHCPConfig contains DHCP server configuration
 type DHCPConfig struct {
+	Enabled      *bool      `json:"enabled,omitempty"` // default true; set false for DNS-only mode
+	Interface    string     `json:"interface,omitempty"` // override top-level interface
 	Subnet       string     `json:"subnet"`
 	RangeStart   string     `json:"range_start"`
 	RangeEnd     string     `json:"range_end"`
@@ -171,6 +173,13 @@ func (c *Config) SetDefaults() {
 	}
 
 	// DHCP defaults
+	if c.DHCP.Enabled == nil {
+		t := true
+		c.DHCP.Enabled = &t
+	}
+	if c.DHCP.Interface == "" {
+		c.DHCP.Interface = c.Interface
+	}
 	if c.DHCP.DefaultTTL == 0 {
 		c.DHCP.DefaultTTL = Duration(5 * time.Minute)
 	}
@@ -295,6 +304,10 @@ func (c *Config) Validate() error {
 }
 
 func (c *Config) validateDHCP() error {
+	if !c.DHCP.IsEnabled() {
+		return nil // skip validation when DHCP is disabled
+	}
+
 	if c.DHCP.Subnet == "" {
 		return fmt.Errorf("dhcp.subnet is required")
 	}
@@ -567,6 +580,11 @@ func Watch(path string, callback func(*Config) error) error {
 	}
 
 	return nil
+}
+
+// IsEnabled returns whether DHCP is enabled (defaults to true)
+func (d *DHCPConfig) IsEnabled() bool {
+	return d.Enabled == nil || *d.Enabled
 }
 
 // GetSubnet returns the parsed subnet IPNet
