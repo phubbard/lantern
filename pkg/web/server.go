@@ -67,6 +67,7 @@ func New(cfg *config.Config, pool *model.LeasePool, m *metrics.Collector, e *eve
 	mux.HandleFunc("GET /api/subscriptions", s.handleSubscriptionStatus)
 	mux.HandleFunc("POST /api/subscriptions/update", s.handleSubscriptionUpdate)
 	mux.HandleFunc("GET /api/events/{mac}", s.handleAPIEventsByMAC)
+	mux.HandleFunc("DELETE /api/leases/{mac}", s.handleAPIReleaseLease)
 	mux.HandleFunc("POST /api/reload", s.handleReload)
 	mux.HandleFunc("POST /api/static", s.handleAddStatic)
 	mux.HandleFunc("DELETE /api/static/{mac}", s.handleDeleteStatic)
@@ -305,6 +306,27 @@ func (s *Server) handleAPIEventsByMAC(w http.ResponseWriter, r *http.Request) {
 		evts = []model.HostEvent{}
 	}
 	json.NewEncoder(w).Encode(evts)
+}
+
+// handleAPIReleaseLease deletes a lease so the client gets NAK'd on next renewal.
+func (s *Server) handleAPIReleaseLease(w http.ResponseWriter, r *http.Request) {
+	macStr := r.PathValue("mac")
+	parsedMAC, err := net.ParseMAC(macStr)
+	if err != nil {
+		http.Error(w, "invalid MAC address", http.StatusBadRequest)
+		return
+	}
+	if s.pool == nil {
+		http.Error(w, "DHCP not enabled", http.StatusNotFound)
+		return
+	}
+	if err := s.pool.ReleaseLease(parsedMAC); err != nil {
+		http.Error(w, err.Error(), http.StatusNotFound)
+		return
+	}
+	s.logger.Info("lease released via web UI", "mac", macStr)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"status": "released", "mac": macStr})
 }
 
 // handleReload triggers a configuration reload.
@@ -793,6 +815,20 @@ func leaseDetailContent() *template.Template {
     </div>
 </div>
 
+{{if not .Static}}
+<div class="card" id="release-card">
+    <h2>Lease Actions</h2>
+    <div style="display: flex; align-items: center; gap: 1rem; flex-wrap: wrap;">
+        <button class="btn" onclick="releaseLease()" id="release-btn" style="background-color: #ef4444;">Release Lease</button>
+        <span style="color: #999; font-size: 0.9rem;">
+            Removes this lease from the server. The client will get a NAK on its next renewal
+            and fall back to DHCPDISCOVER to get a new lease.
+        </span>
+        <span id="release-status" style="font-weight: 600;"></span>
+    </div>
+</div>
+{{end}}
+
 <div class="card">
     <div class="tab-bar">
         <div class="tab active" onclick="switchTab('all')">All Events</div>
@@ -924,6 +960,34 @@ func leaseDetailContent() *template.Template {
             const s = Math.floor((diff % 60000) / 1000);
             rem.textContent = (h > 0 ? h + 'h ' : '') + m + 'm ' + s + 's';
             rem.style.color = diff < 300000 ? '#f59e0b' : '#22c55e';
+        }
+    }
+
+    async function releaseLease() {
+        if (!confirm('Release this lease? The client will need to re-discover to get a new one.')) return;
+        const btn = document.getElementById('release-btn');
+        const status = document.getElementById('release-status');
+        btn.disabled = true;
+        btn.textContent = 'Releasing...';
+        try {
+            const resp = await fetch('/api/leases/' + encodeURIComponent(MAC), { method: 'DELETE' });
+            if (resp.ok) {
+                status.textContent = 'Lease released';
+                status.style.color = '#22c55e';
+                btn.textContent = 'Released';
+                setTimeout(() => { window.location.href = '/leases'; }, 1500);
+            } else {
+                const err = await resp.text();
+                status.textContent = 'Error: ' + err;
+                status.style.color = '#ef4444';
+                btn.disabled = false;
+                btn.textContent = 'Release Lease';
+            }
+        } catch(e) {
+            status.textContent = 'Network error';
+            status.style.color = '#ef4444';
+            btn.disabled = false;
+            btn.textContent = 'Release Lease';
         }
     }
 
