@@ -1,11 +1,12 @@
 {
-  "_comment": "Test network config — bind to second NIC for isolated testing with DHCP enabled",
+  "_comment": "Test network config — bind to USB ethernet NIC for isolated DHCP+DNS testing",
+  "_note": "USB ethernet: enx5c857e306c10, main NIC: eno1. Run nat-enable.sh for internet access.",
   "domain": "test.lantern",
-  "interface": "eth1",
+  "interface": "enx5c857e306c10",
 
   "dhcp": {
     "enabled": true,
-    "interface": "eth1",
+    "interface": "enx5c857e306c10",
     "subnet": "10.99.0.0/24",
     "range_start": "10.99.0.100",
     "range_end": "10.99.0.200",

@@ -1,13 +1,14 @@
 {
+  "_note": "DNS-only mode on USB ethernet (enx5c857e306c10). No DHCP — UDM handles that.",
   "domain": "phfactor.net",
-  "interface": "eth0",
+  "interface": "enx5c857e306c10",
 
   "dhcp": {
     "enabled": false
   },
 
   "dns": {
-    "listen": "0.0.0.0:53",
+    "listen": "10.99.0.1:53",
     "name_format": {
       "with_hostname": "{hostname}.{domain}",
       "fallback": "dhcp-{octet:03d}.{domain}"
@@ -43,7 +44,7 @@
 
   "web": {
     "enabled": true,
-    "listen": "0.0.0.0:8080"
+    "listen": "10.99.0.1:8080"
   },
 
   "events": {
