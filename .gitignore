@@ -54,3 +54,4 @@ docker-compose.override.yml
 # Config overrides (keep example, ignore user configs)
 config.json
 /configs/local.json
+.lantern-data/
