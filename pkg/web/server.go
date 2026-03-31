@@ -66,6 +66,7 @@ func New(cfg *config.Config, pool *model.LeasePool, m *metrics.Collector, e *eve
 	mux.HandleFunc("POST /api/blocker/resume", s.handleBlockerResume)
 	mux.HandleFunc("GET /api/subscriptions", s.handleSubscriptionStatus)
 	mux.HandleFunc("POST /api/subscriptions/update", s.handleSubscriptionUpdate)
+	mux.HandleFunc("GET /api/events/{mac}", s.handleAPIEventsByMAC)
 	mux.HandleFunc("POST /api/reload", s.handleReload)
 	mux.HandleFunc("POST /api/static", s.handleAddStatic)
 	mux.HandleFunc("DELETE /api/static/{mac}", s.handleDeleteStatic)
@@ -139,8 +140,12 @@ func (s *Server) handleLeaseDetail(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
+	title := lease.Hostname
+	if title == "" {
+		title = lease.IP.String()
+	}
 	page := baseLayout(
-		fmt.Sprintf("Host: %s", lease.Hostname),
+		fmt.Sprintf("Host: %s", title),
 		leaseDetailContent(),
 	)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -289,6 +294,17 @@ func (s *Server) handleSubscriptionUpdate(w http.ResponseWriter, r *http.Request
 	s.subscriptions.UpdateNow()
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"status": "updated"})
+}
+
+// handleAPIEventsByMAC returns events for a specific MAC address as JSON.
+func (s *Server) handleAPIEventsByMAC(w http.ResponseWriter, r *http.Request) {
+	macStr := r.PathValue("mac")
+	evts := s.events.GetByMAC(macStr)
+	w.Header().Set("Content-Type", "application/json")
+	if evts == nil {
+		evts = []model.HostEvent{}
+	}
+	json.NewEncoder(w).Encode(evts)
 }
 
 // handleReload triggers a configuration reload.
@@ -489,6 +505,7 @@ func baseLayout(title string, content *template.Template) *template.Template {
 
 	base := template.New("base").Funcs(template.FuncMap{
 		"PageTitle": func() string { return title },
+		"mul":       func(a, b float64) float64 { return a * b },
 	})
 
 	base, err := base.Parse(baseHTML)
@@ -680,30 +697,259 @@ func leasesContent() *template.Template {
 // leaseDetailContent returns the lease detail content template.
 func leaseDetailContent() *template.Template {
 	html := `{{define "content"}}
-<div class="card">
-    <h2>{{.Hostname}}</h2>
-    <table style="width: auto;">
-        <tr>
-            <td style="font-weight: bold; padding-right: 2rem;">MAC Address:</td>
-            <td>{{.MAC}}</td>
-        </tr>
-        <tr>
-            <td style="font-weight: bold; padding-right: 2rem;">IP Address:</td>
-            <td>{{.IP}}</td>
-        </tr>
-        <tr>
-            <td style="font-weight: bold; padding-right: 2rem;">Leased At:</td>
-            <td>{{.GrantedAt.Format "2006-01-02 15:04:05"}}</td>
-        </tr>
-        <tr>
-            <td style="font-weight: bold; padding-right: 2rem;">Expires At:</td>
-            <td>{{.ExpiresAt.Format "2006-01-02 15:04:05"}}</td>
-        </tr>
-    </table>
+<style>
+    .detail-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 1.5rem; margin-bottom: 1.5rem; }
+    .detail-row { display: flex; padding: 0.5rem 0; border-bottom: 1px solid #3d3d3d; }
+    .detail-label { color: #999; min-width: 140px; font-size: 0.9rem; }
+    .detail-value { color: #e0e0e0; font-family: monospace; }
+    .badge { display: inline-block; padding: 0.15rem 0.5rem; border-radius: 3px; font-size: 0.8rem; font-weight: 600; }
+    .badge-static { background: #22c55e33; color: #22c55e; }
+    .badge-dynamic { background: #4a9eff33; color: #4a9eff; }
+    .badge-dhcp { background: #8b5cf633; color: #a78bfa; }
+    .badge-dns { background: #06b6d433; color: #22d3ee; }
+    .badge-other { background: #64748b33; color: #94a3b8; }
+    .tab-bar { display: flex; gap: 0; border-bottom: 2px solid #3d3d3d; margin-bottom: 1rem; }
+    .tab { padding: 0.5rem 1.25rem; cursor: pointer; color: #999; border-bottom: 2px solid transparent; margin-bottom: -2px; }
+    .tab:hover { color: #e0e0e0; }
+    .tab.active { color: #4a9eff; border-bottom-color: #4a9eff; }
+    .tab-panel { display: none; }
+    .tab-panel.active { display: block; }
+    .pager { display: flex; gap: 0.5rem; align-items: center; margin-top: 1rem; justify-content: center; }
+    .pager button { background: #3d3d3d; color: #e0e0e0; border: none; padding: 0.4rem 0.8rem; border-radius: 4px; cursor: pointer; }
+    .pager button:hover { background: #4a9eff; }
+    .pager button:disabled { opacity: 0.3; cursor: default; }
+    .pager button:disabled:hover { background: #3d3d3d; }
+    .dns-stat { text-align: center; }
+    .dns-stat-value { font-size: 1.5rem; font-weight: 700; color: #4a9eff; }
+    .dns-stat-label { font-size: 0.8rem; color: #999; }
+</style>
+
+<div class="detail-grid">
+    <div class="card">
+        <h2>Host Information</h2>
+        <div class="detail-row">
+            <span class="detail-label">Hostname</span>
+            <span class="detail-value">{{.Hostname}}{{if not .Hostname}}<span style="color:#666">unknown</span>{{end}}</span>
+        </div>
+        <div class="detail-row">
+            <span class="detail-label">DNS Name</span>
+            <span class="detail-value">{{.DNSName}}{{if not .DNSName}}<span style="color:#666">none</span>{{end}}</span>
+        </div>
+        <div class="detail-row">
+            <span class="detail-label">MAC Address</span>
+            <span class="detail-value">{{.MAC}}</span>
+        </div>
+        <div class="detail-row">
+            <span class="detail-label">IP Address</span>
+            <span class="detail-value">{{.IP}}</span>
+        </div>
+        <div class="detail-row">
+            <span class="detail-label">Type</span>
+            <span class="detail-value">{{if .Static}}<span class="badge badge-static">Static</span>{{else}}<span class="badge badge-dynamic">Dynamic</span>{{end}}</span>
+        </div>
+        <div class="detail-row">
+            <span class="detail-label">Client ID</span>
+            <span class="detail-value">{{.ClientID}}{{if not .ClientID}}<span style="color:#666">none</span>{{end}}</span>
+        </div>
+    </div>
+
+    <div class="card">
+        <h2>Lease Timing</h2>
+        <div class="detail-row">
+            <span class="detail-label">Granted At</span>
+            <span class="detail-value">{{.GrantedAt.Format "2006-01-02 15:04:05"}}</span>
+        </div>
+        <div class="detail-row">
+            <span class="detail-label">Expires At</span>
+            <span class="detail-value" id="expires-at" data-expires="{{.ExpiresAt.Format "2006-01-02T15:04:05Z07:00"}}">{{.ExpiresAt.Format "2006-01-02 15:04:05"}}</span>
+        </div>
+        <div class="detail-row">
+            <span class="detail-label">TTL</span>
+            <span class="detail-value">{{.TTL}}</span>
+        </div>
+        <div class="detail-row">
+            <span class="detail-label">Time Remaining</span>
+            <span class="detail-value" id="time-remaining">calculating...</span>
+        </div>
+        {{if .Fingerprint}}
+        <h2 style="margin-top: 1.5rem;">Device Fingerprint</h2>
+        <div class="detail-row">
+            <span class="detail-label">OS</span>
+            <span class="detail-value">{{.Fingerprint.OS}} {{.Fingerprint.OSVersion}}</span>
+        </div>
+        <div class="detail-row">
+            <span class="detail-label">Device Type</span>
+            <span class="detail-value">{{.Fingerprint.DeviceType}}</span>
+        </div>
+        <div class="detail-row">
+            <span class="detail-label">Confidence</span>
+            <span class="detail-value">{{printf "%.0f" (mul .Fingerprint.Confidence 100)}}%</span>
+        </div>
+        <div class="detail-row">
+            <span class="detail-label">First Seen</span>
+            <span class="detail-value">{{.Fingerprint.FirstSeen.Format "2006-01-02 15:04:05"}}</span>
+        </div>
+        {{end}}
+    </div>
 </div>
+
+<div class="card">
+    <div class="tab-bar">
+        <div class="tab active" onclick="switchTab('all')">All Events</div>
+        <div class="tab" onclick="switchTab('dhcp')">DHCP</div>
+        <div class="tab" onclick="switchTab('dns')">DNS</div>
+    </div>
+
+    <div id="dns-summary" style="display:none; margin-bottom: 1rem;">
+        <div class="grid" style="grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));">
+            <div class="dns-stat"><div class="dns-stat-value" id="dns-total">0</div><div class="dns-stat-label">Total Queries</div></div>
+            <div class="dns-stat"><div class="dns-stat-value" id="dns-blocked">0</div><div class="dns-stat-label">Blocked</div></div>
+            <div class="dns-stat"><div class="dns-stat-value" id="dns-unique">0</div><div class="dns-stat-label">Unique Domains</div></div>
+        </div>
+    </div>
+
+    <table>
+        <thead>
+            <tr>
+                <th>Time</th>
+                <th>Type</th>
+                <th>Detail</th>
+            </tr>
+        </thead>
+        <tbody id="events-body">
+            <tr><td colspan="3" style="text-align:center; color:#999;">Loading events...</td></tr>
+        </tbody>
+    </table>
+    <div class="pager">
+        <button id="page-prev" onclick="changePage(-1)" disabled>&larr; Newer</button>
+        <span id="page-info" style="color:#999; font-size:0.9rem;"></span>
+        <button id="page-next" onclick="changePage(1)" disabled>Older &rarr;</button>
+    </div>
+</div>
+
+<script>
+    const MAC = "{{.MAC}}";
+    const PAGE_SIZE = 25;
+    let allEvents = [];
+    let filteredEvents = [];
+    let currentPage = 0;
+    let currentFilter = 'all';
+
+    function badgeClass(type) {
+        if (type.startsWith('dhcp_')) return 'badge-dhcp';
+        if (type === 'dns_query') return 'badge-dns';
+        return 'badge-other';
+    }
+
+    function fmtTime(ts) {
+        const d = new Date(ts);
+        return d.toLocaleString();
+    }
+
+    function switchTab(filter) {
+        currentFilter = filter;
+        currentPage = 0;
+        document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+        document.querySelector('.tab[onclick*="' + filter + '"]').classList.add('active');
+        applyFilter();
+        render();
+    }
+
+    function applyFilter() {
+        if (currentFilter === 'all') {
+            filteredEvents = allEvents;
+        } else if (currentFilter === 'dhcp') {
+            filteredEvents = allEvents.filter(e => e.type.startsWith('dhcp_'));
+        } else if (currentFilter === 'dns') {
+            filteredEvents = allEvents.filter(e => e.type === 'dns_query');
+        }
+        document.getElementById('dns-summary').style.display = currentFilter === 'dns' ? 'block' : 'none';
+    }
+
+    function changePage(delta) {
+        currentPage += delta;
+        render();
+    }
+
+    function render() {
+        const totalPages = Math.max(1, Math.ceil(filteredEvents.length / PAGE_SIZE));
+        currentPage = Math.max(0, Math.min(currentPage, totalPages - 1));
+
+        const start = currentPage * PAGE_SIZE;
+        const pageEvents = filteredEvents.slice(start, start + PAGE_SIZE);
+
+        const tbody = document.getElementById('events-body');
+        if (pageEvents.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="3" style="text-align:center; color:#999;">No events</td></tr>';
+        } else {
+            tbody.innerHTML = pageEvents.map(e =>
+                '<tr>' +
+                '<td style="white-space:nowrap;">' + fmtTime(e.timestamp) + '</td>' +
+                '<td><span class="badge ' + badgeClass(e.type) + '">' + e.type.replace('_', ' ') + '</span></td>' +
+                '<td style="word-break:break-all;">' + (e.detail || '') + '</td>' +
+                '</tr>'
+            ).join('');
+        }
+
+        document.getElementById('page-info').textContent =
+            'Page ' + (currentPage + 1) + ' of ' + totalPages + ' (' + filteredEvents.length + ' events)';
+        document.getElementById('page-prev').disabled = currentPage === 0;
+        document.getElementById('page-next').disabled = currentPage >= totalPages - 1;
+    }
+
+    function computeDNSStats() {
+        const dnsEvents = allEvents.filter(e => e.type === 'dns_query');
+        const blocked = dnsEvents.filter(e => e.detail && e.detail.includes('blocked')).length;
+        const domains = new Set(dnsEvents.map(e => {
+            const m = e.detail && e.detail.match(/^(\S+)/);
+            return m ? m[1] : '';
+        }).filter(Boolean));
+        document.getElementById('dns-total').textContent = dnsEvents.length;
+        document.getElementById('dns-blocked').textContent = blocked;
+        document.getElementById('dns-unique').textContent = domains.size;
+    }
+
+    function updateTimeRemaining() {
+        const el = document.getElementById('expires-at');
+        const exp = new Date(el.dataset.expires);
+        const now = new Date();
+        const diff = exp - now;
+        const rem = document.getElementById('time-remaining');
+        if (diff <= 0) {
+            rem.textContent = 'Expired';
+            rem.style.color = '#ef4444';
+        } else {
+            const h = Math.floor(diff / 3600000);
+            const m = Math.floor((diff % 3600000) / 60000);
+            const s = Math.floor((diff % 60000) / 1000);
+            rem.textContent = (h > 0 ? h + 'h ' : '') + m + 'm ' + s + 's';
+            rem.style.color = diff < 300000 ? '#f59e0b' : '#22c55e';
+        }
+    }
+
+    async function loadEvents() {
+        try {
+            const resp = await fetch('/api/events/' + encodeURIComponent(MAC));
+            const data = await resp.json();
+            allEvents = data.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+            applyFilter();
+            computeDNSStats();
+            render();
+        } catch(err) {
+            document.getElementById('events-body').innerHTML =
+                '<tr><td colspan="3" style="text-align:center; color:#ef4444;">Failed to load events</td></tr>';
+        }
+    }
+
+    loadEvents();
+    updateTimeRemaining();
+    setInterval(updateTimeRemaining, 1000);
+</script>
 {{end}}`
 
-	t, err := template.New("leaseDetailContent").Parse(html)
+	t, err := template.New("leaseDetailContent").Funcs(template.FuncMap{
+		"mul": func(a, b float64) float64 { return a * b },
+	}).Parse(html)
 	if err != nil {
 		panic(err)
 	}
