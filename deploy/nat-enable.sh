@@ -5,16 +5,13 @@
 # Usage: sudo ./nat-enable.sh [WAN_IFACE] [LAN_IFACE] [LAN_SUBNET]
 #
 # Defaults auto-detect the primary default-route interface for WAN.
-# LAN_IFACE and LAN_SUBNET default to the testnet config values.
+# Uses nftables (nft) which is standard on modern Debian/Ubuntu.
 
 set -euo pipefail
 
 # --- Arguments / defaults ---------------------------------------------------
 
-# WAN: interface with the default route (typically eth0, ens18, etc.)
 WAN_IFACE="${1:-$(ip route show default | awk '/default/ {print $5; exit}')}"
-
-# LAN: the USB ethernet interface running Lantern's testnet
 LAN_IFACE="${2:-}"
 LAN_SUBNET="${3:-10.99.0.0/24}"
 
@@ -41,29 +38,36 @@ echo ""
 # --- Enable IP forwarding ---------------------------------------------------
 echo "[1/4] Enabling IP forwarding..."
 sysctl -w net.ipv4.ip_forward=1 > /dev/null
-# Make persistent across reboots
 if ! grep -q '^net.ipv4.ip_forward=1' /etc/sysctl.d/99-lantern-nat.conf 2>/dev/null; then
     echo 'net.ipv4.ip_forward=1' > /etc/sysctl.d/99-lantern-nat.conf
     echo "  Written to /etc/sysctl.d/99-lantern-nat.conf"
 fi
 
-# --- Configure iptables NAT -------------------------------------------------
-echo "[2/4] Adding iptables MASQUERADE rule..."
-# Remove existing rule first (idempotent)
-iptables -t nat -D POSTROUTING -s "$LAN_SUBNET" -o "$WAN_IFACE" -j MASQUERADE 2>/dev/null || true
-iptables -t nat -A POSTROUTING -s "$LAN_SUBNET" -o "$WAN_IFACE" -j MASQUERADE
+# --- Configure nftables NAT -------------------------------------------------
+NFT_TABLE="lantern-nat"
 
-echo "[3/4] Adding iptables FORWARD rules..."
-# Allow forwarding from LAN to WAN
-iptables -D FORWARD -i "$LAN_IFACE" -o "$WAN_IFACE" -s "$LAN_SUBNET" -j ACCEPT 2>/dev/null || true
-iptables -A FORWARD -i "$LAN_IFACE" -o "$WAN_IFACE" -s "$LAN_SUBNET" -j ACCEPT
+echo "[2/4] Creating nftables table and NAT masquerade..."
+# Remove old table if it exists (idempotent)
+nft delete table ip "$NFT_TABLE" 2>/dev/null || true
 
-# Allow established/related return traffic
-iptables -D FORWARD -i "$WAN_IFACE" -o "$LAN_IFACE" -m state --state RELATED,ESTABLISHED -j ACCEPT 2>/dev/null || true
-iptables -A FORWARD -i "$WAN_IFACE" -o "$LAN_IFACE" -m state --state RELATED,ESTABLISHED -j ACCEPT
+nft -f - <<NFTEOF
+table ip $NFT_TABLE {
+    chain postrouting {
+        type nat hook postrouting priority srcnat; policy accept;
+        ip saddr $LAN_SUBNET oifname "$WAN_IFACE" masquerade
+    }
+
+    chain forward {
+        type filter hook forward priority filter; policy accept;
+        iifname "$LAN_IFACE" oifname "$WAN_IFACE" ip saddr $LAN_SUBNET accept
+        iifname "$WAN_IFACE" oifname "$LAN_IFACE" ct state established,related accept
+    }
+}
+NFTEOF
+echo "  Created nft table '$NFT_TABLE'"
 
 # --- Assign IP to LAN interface if not already set --------------------------
-echo "[4/4] Checking LAN interface IP..."
+echo "[3/4] Checking LAN interface IP..."
 LAN_IP="10.99.0.1"
 if ! ip addr show "$LAN_IFACE" | grep -q "$LAN_IP"; then
     ip addr add "${LAN_IP}/24" dev "$LAN_IFACE"
@@ -73,8 +77,12 @@ else
     echo "  $LAN_IFACE already has $LAN_IP"
 fi
 
+echo "[4/4] Verifying..."
+nft list table ip "$NFT_TABLE" | head -3
+echo "  ..."
+
 echo ""
 echo "=== NAT enabled ==="
 echo "Clients on $LAN_SUBNET via $LAN_IFACE can now reach the internet."
 echo "To verify: connect a device, get a DHCP lease from Lantern, then ping 8.8.8.8"
-echo "To disable: sudo ./nat-disable.sh $WAN_IFACE $LAN_IFACE $LAN_SUBNET"
+echo "To disable: sudo ./nat-disable.sh $WAN_IFACE $LAN_IFACE"

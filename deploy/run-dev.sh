@@ -89,4 +89,4 @@ fi
 # --- Run it ------------------------------------------------------------------
 info "Starting lantern..."
 echo ""
-exec "$BINARY" -config "$TEMP_CONFIG"
+exec "$BINARY" serve -c "$TEMP_CONFIG"

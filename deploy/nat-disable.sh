@@ -1,24 +1,22 @@
 #!/usr/bin/env bash
 # nat-disable.sh — Remove NAT routing rules set up by nat-enable.sh
 #
-# Usage: sudo ./nat-disable.sh [WAN_IFACE] [LAN_IFACE] [LAN_SUBNET]
+# Usage: sudo ./nat-disable.sh [WAN_IFACE] [LAN_IFACE]
 
 set -euo pipefail
 
-WAN_IFACE="${1:-$(ip route show default | awk '/default/ {print $5; exit}')}"
 LAN_IFACE="${2:-enx5c857e306c10}"
-LAN_SUBNET="${3:-10.99.0.0/24}"
+NFT_TABLE="lantern-nat"
 
 echo "=== Lantern Testnet NAT Teardown ==="
-echo "  WAN interface:  $WAN_IFACE"
-echo "  LAN interface:  $LAN_IFACE"
-echo "  LAN subnet:     $LAN_SUBNET"
-echo ""
 
-echo "[1/3] Removing iptables rules..."
-iptables -t nat -D POSTROUTING -s "$LAN_SUBNET" -o "$WAN_IFACE" -j MASQUERADE 2>/dev/null && echo "  Removed MASQUERADE rule" || echo "  MASQUERADE rule not found (already removed)"
-iptables -D FORWARD -i "$LAN_IFACE" -o "$WAN_IFACE" -s "$LAN_SUBNET" -j ACCEPT 2>/dev/null && echo "  Removed FORWARD LAN->WAN rule" || echo "  FORWARD LAN->WAN rule not found"
-iptables -D FORWARD -i "$WAN_IFACE" -o "$LAN_IFACE" -m state --state RELATED,ESTABLISHED -j ACCEPT 2>/dev/null && echo "  Removed FORWARD WAN->LAN rule" || echo "  FORWARD WAN->LAN rule not found"
+echo "[1/3] Removing nftables table '$NFT_TABLE'..."
+if nft list table ip "$NFT_TABLE" &>/dev/null; then
+    nft delete table ip "$NFT_TABLE"
+    echo "  Removed."
+else
+    echo "  Table not found (already removed)."
+fi
 
 echo "[2/3] Disabling IP forwarding..."
 sysctl -w net.ipv4.ip_forward=0 > /dev/null
@@ -36,4 +34,3 @@ fi
 
 echo ""
 echo "=== NAT disabled ==="
-echo "Clients on $LAN_SUBNET can no longer route through this server."
