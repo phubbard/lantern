@@ -81,8 +81,18 @@ if [ -n "$USB_IFACE" ] && [ "$USB_IFACE" != "lo" ]; then
         exit 1
     fi
     if ! ip addr show "$USB_IFACE" | grep -q 'inet '; then
-        warn "Interface $USB_IFACE has no IP address."
-        warn "You may need to run: sudo ip addr add 10.99.0.1/24 dev $USB_IFACE && sudo ip link set $USB_IFACE up"
+        # Extract gateway IP and subnet mask from config to use as interface address
+        GW_IP=$(grep -o '"gateway":\s*"[^"]*"' "$TEMP_CONFIG" | head -1 | cut -d'"' -f4)
+        SUBNET_MASK=$(grep -o '"subnet":\s*"[^"]*"' "$TEMP_CONFIG" | head -1 | cut -d'"' -f4 | cut -d'/' -f2)
+        if [ -n "$GW_IP" ] && [ -n "$SUBNET_MASK" ]; then
+            warn "Interface $USB_IFACE has no IP address. Assigning ${GW_IP}/${SUBNET_MASK}..."
+            sudo ip addr add "${GW_IP}/${SUBNET_MASK}" dev "$USB_IFACE"
+            sudo ip link set "$USB_IFACE" up
+            info "Assigned ${GW_IP}/${SUBNET_MASK} to $USB_IFACE"
+        else
+            warn "Interface $USB_IFACE has no IP address and couldn't extract gateway/subnet from config."
+            warn "Run manually: sudo ip addr add 10.99.0.1/24 dev $USB_IFACE && sudo ip link set $USB_IFACE up"
+        fi
     fi
 fi
 
