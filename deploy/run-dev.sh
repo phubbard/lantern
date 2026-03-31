@@ -29,17 +29,22 @@ info()  { echo -e "${GREEN}[dev]${NC} $*"; }
 warn()  { echo -e "${YELLOW}[dev]${NC} $*"; }
 error() { echo -e "${RED}[dev]${NC} $*" >&2; }
 
-# --- Find or build the binary ------------------------------------------------
-if [ -f "$BINARY" ]; then
-    info "Using existing binary: $BINARY"
-elif command -v go &>/dev/null; then
+# --- Pull latest and build ----------------------------------------------------
+if command -v git &>/dev/null && [ -d "$REPO_DIR/.git" ]; then
+    info "Pulling latest changes..."
+    (cd "$REPO_DIR" && git pull --ff-only 2>&1) | sed 's/^/  /'
+fi
+
+if command -v go &>/dev/null; then
     info "Building lantern from source..."
     (cd "$REPO_DIR" && go build -o lantern ./cmd/lantern)
     info "Built: $BINARY"
+elif [ -f "$BINARY" ]; then
+    warn "Go not installed, using existing binary: $BINARY"
 else
     error "No lantern binary found and Go is not installed."
     echo "  Either:"
-    echo "    - Build it: go build -o lantern ./cmd/lantern"
+    echo "    - Install Go and rebuild"
     echo "    - Download a release: gh release download --pattern 'lantern-linux-*'"
     echo "    - Place the binary at: $BINARY"
     exit 1
