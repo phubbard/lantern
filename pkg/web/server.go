@@ -657,7 +657,7 @@ func leasesContent() *template.Template {
                     <td>{{.MAC}}</td>
                     <td>{{.IP}}</td>
                     <td>{{.ExpiresAt.Format "2006-01-02 15:04:05"}}</td>
-                    <td><button class="btn btn-small">Details</button></td>
+                    <td><a href="/leases/{{.MAC}}" class="btn btn-small" style="text-decoration:none;">Details</a></td>
                 </tr>
                 {{end}}
             {{else}}
