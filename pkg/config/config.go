@@ -53,7 +53,7 @@ type Config struct {
 
 // DHCPConfig contains DHCP server configuration
 type DHCPConfig struct {
-	Enabled      *bool      `json:"enabled,omitempty"` // default true; set false for DNS-only mode
+	Enabled      *bool      `json:"enabled,omitempty"`   // default true; set false for DNS-only mode
 	Interface    string     `json:"interface,omitempty"` // override top-level interface
 	Subnet       string     `json:"subnet"`
 	RangeStart   string     `json:"range_start"`
