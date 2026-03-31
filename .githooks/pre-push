@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+# pre-push hook: run gofmt and go vet before pushing.
+# Install: git config core.hooksPath .githooks
+
+set -euo pipefail
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+NC='\033[0m'
+
+# Check if Go is available
+if ! command -v go &>/dev/null; then
+    echo -e "${RED}[pre-push] go not found, skipping checks${NC}"
+    exit 0
+fi
+
+# Find unformatted files
+UNFORMATTED=$(gofmt -l . 2>/dev/null | grep -v vendor/ || true)
+if [ -n "$UNFORMATTED" ]; then
+    echo -e "${RED}[pre-push] gofmt required on:${NC}"
+    echo "$UNFORMATTED"
+    echo ""
+    echo "Run: gofmt -w ."
+    exit 1
+fi
+echo -e "${GREEN}[pre-push] gofmt OK${NC}"
+
+# Run go vet
+if ! go vet ./... 2>&1; then
+    echo -e "${RED}[pre-push] go vet failed${NC}"
+    exit 1
+fi
+echo -e "${GREEN}[pre-push] go vet OK${NC}"
