@@ -959,31 +959,149 @@ func leaseDetailContent() *template.Template {
 // dnsContent returns the DNS query log content template.
 func dnsContent() *template.Template {
 	html := `{{define "content"}}
+<style>
+    .dns-badge { display: inline-block; padding: 0.15rem 0.5rem; border-radius: 3px; font-size: 0.8rem; font-weight: 600; }
+    .dns-blocked { background: #ef444433; color: #f87171; }
+    .dns-local { background: #22c55e33; color: #22c55e; }
+    .dns-cache, .dns-cached { background: #f59e0b33; color: #f59e0b; }
+    .dns-upstream, .dns-doh, .dns-fallback { background: #4a9eff33; color: #4a9eff; }
+    .dns-error { background: #ef444433; color: #ef4444; }
+    .dns-controls { display: flex; gap: 1rem; align-items: center; margin-bottom: 1rem; flex-wrap: wrap; }
+    .dns-counter { color: #999; font-size: 0.9rem; }
+    .dns-counter b { color: #e0e0e0; }
+    #dns-live-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #22c55e; margin-right: 0.5rem; animation: pulse 2s infinite; }
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+</style>
+
 <div class="card">
     <h2>DNS Query Log</h2>
+    <div class="dns-controls">
+        <span><span id="dns-live-dot"></span>Live</span>
+        <span class="dns-counter">Total: <b id="cnt-total">0</b></span>
+        <span class="dns-counter">Blocked: <b id="cnt-blocked" style="color:#f87171;">0</b></span>
+        <span class="dns-counter">Cached: <b id="cnt-cached" style="color:#f59e0b;">0</b></span>
+        <span class="dns-counter">Upstream: <b id="cnt-upstream" style="color:#4a9eff;">0</b></span>
+        <button class="btn btn-small" onclick="clearLog()">Clear</button>
+        <label style="color:#999; font-size:0.9rem;"><input type="checkbox" id="auto-scroll" checked> Auto-scroll</label>
+    </div>
+    <div style="max-height: 600px; overflow-y: auto;" id="dns-scroll">
     <table>
         <thead>
             <tr>
-                <th>Timestamp</th>
-                <th>Client IP</th>
+                <th style="width:160px;">Timestamp</th>
                 <th>Domain</th>
-                <th>Type</th>
-                <th>Status</th>
-                <th>Latency</th>
+                <th style="width:60px;">Type</th>
+                <th style="width:90px;">Source</th>
             </tr>
         </thead>
-        <tbody>
-            <tr>
-                <td colspan="6" style="text-align: center; color: #999;">Loading...</td>
+        <tbody id="dns-body">
+            <tr id="dns-empty">
+                <td colspan="4" style="text-align: center; color: #999;">Waiting for queries...</td>
             </tr>
         </tbody>
     </table>
+    </div>
 </div>
 
 <script>
+    const MAX_ROWS = 500;
+    let total = 0, blocked = 0, cached = 0, upstream = 0;
+
+    function parseDetail(detail) {
+        const parts = {};
+        (detail || '').split(' ').forEach(p => {
+            const [k, ...v] = p.split('=');
+            if (k && v.length) parts[k] = v.join('=');
+        });
+        return parts;
+    }
+
+    function sourceClass(src) {
+        if (src === 'blocked') return 'dns-blocked';
+        if (src === 'local') return 'dns-local';
+        if (src === 'cache' || src === 'cached') return 'dns-cache';
+        if (src === 'error') return 'dns-error';
+        return 'dns-upstream';
+    }
+
+    function fmtTime(ts) {
+        const d = new Date(ts);
+        return d.toLocaleTimeString() + '.' + String(d.getMilliseconds()).padStart(3, '0');
+    }
+
+    function addRow(evt) {
+        if (evt.type !== 'dns_query') return;
+
+        const p = parseDetail(evt.detail);
+        const domain = (p.name || '').replace(/\.$/, '');
+        const qtype = p.type || '?';
+        const source = p.source || 'unknown';
+
+        total++;
+        if (source === 'blocked') blocked++;
+        else if (source === 'cache' || source === 'cached') cached++;
+        else if (source !== 'local' && source !== 'error') upstream++;
+
+        document.getElementById('cnt-total').textContent = total;
+        document.getElementById('cnt-blocked').textContent = blocked;
+        document.getElementById('cnt-cached').textContent = cached;
+        document.getElementById('cnt-upstream').textContent = upstream;
+
+        const empty = document.getElementById('dns-empty');
+        if (empty) empty.remove();
+
+        const tbody = document.getElementById('dns-body');
+        const tr = document.createElement('tr');
+        tr.innerHTML =
+            '<td style="white-space:nowrap; font-size:0.85rem;">' + fmtTime(evt.timestamp) + '</td>' +
+            '<td style="font-family:monospace; word-break:break-all;">' + domain + '</td>' +
+            '<td>' + qtype + '</td>' +
+            '<td><span class="dns-badge ' + sourceClass(source) + '">' + source + '</span></td>';
+
+        // Insert at top (newest first)
+        tbody.insertBefore(tr, tbody.firstChild);
+
+        // Trim old rows
+        while (tbody.children.length > MAX_ROWS) {
+            tbody.removeChild(tbody.lastChild);
+        }
+
+        if (document.getElementById('auto-scroll').checked) {
+            document.getElementById('dns-scroll').scrollTop = 0;
+        }
+    }
+
+    function clearLog() {
+        document.getElementById('dns-body').innerHTML =
+            '<tr id="dns-empty"><td colspan="4" style="text-align:center; color:#999;">Waiting for queries...</td></tr>';
+        total = blocked = cached = upstream = 0;
+        document.getElementById('cnt-total').textContent = '0';
+        document.getElementById('cnt-blocked').textContent = '0';
+        document.getElementById('cnt-cached').textContent = '0';
+        document.getElementById('cnt-upstream').textContent = '0';
+    }
+
+    // Load recent events first
+    async function loadRecent() {
+        try {
+            const resp = await fetch('/api/events/stream', {
+                headers: { 'Accept': 'text/event-stream' }
+            });
+        } catch(e) {}
+    }
+
     const eventSource = new EventSource('/api/events/stream');
     eventSource.onmessage = function(event) {
-        console.log('Event:', JSON.parse(event.data));
+        try {
+            const evt = JSON.parse(event.data);
+            addRow(evt);
+        } catch(e) {
+            console.error('Failed to parse event:', e);
+        }
+    };
+    eventSource.onerror = function() {
+        const dot = document.getElementById('dns-live-dot');
+        if (dot) dot.style.background = '#ef4444';
     };
 </script>
 {{end}}`
