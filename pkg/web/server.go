@@ -483,7 +483,7 @@ func baseLayout(title string, content *template.Template) *template.Template {
         {{ template "content" . }}
     </div>
 
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    {{ template "scripts" . }}
 </body>
 </html>`
 
@@ -492,6 +492,12 @@ func baseLayout(title string, content *template.Template) *template.Template {
 	})
 
 	base, err := base.Parse(baseHTML)
+	if err != nil {
+		panic(err)
+	}
+
+	// Add empty default "scripts" block (pages can override it)
+	base, err = base.Parse(`{{define "scripts"}}{{end}}`)
 	if err != nil {
 		panic(err)
 	}
@@ -505,6 +511,15 @@ func baseLayout(title string, content *template.Template) *template.Template {
 	base, err = base.AddParseTree("content", ct.Tree)
 	if err != nil {
 		panic(err)
+	}
+
+	// If the content template defines a "scripts" block, override the default
+	st := content.Lookup("scripts")
+	if st != nil {
+		base, err = base.AddParseTree("scripts", st.Tree)
+		if err != nil {
+			panic(err)
+		}
 	}
 
 	return base
@@ -609,7 +624,8 @@ func dashboardContent() *template.Template {
     updateBlockerStatus();
     setInterval(updateBlockerStatus, 5000);
 </script>
-{{end}}`
+{{end}}
+{{define "scripts"}}<script async src="https://cdn.jsdelivr.net/npm/chart.js"></script>{{end}}`
 
 	t, err := template.New("dashboardContent").Parse(html)
 	if err != nil {
@@ -790,7 +806,8 @@ func metricsContent() *template.Template {
 
     loadMetrics();
 </script>
-{{end}}`
+{{end}}
+{{define "scripts"}}<script async src="https://cdn.jsdelivr.net/npm/chart.js"></script>{{end}}`
 
 	t, err := template.New("metricsContent").Parse(html)
 	if err != nil {
