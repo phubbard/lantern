@@ -87,6 +87,8 @@ if [ -n "$USB_IFACE" ] && [ "$USB_IFACE" != "lo" ]; then
 fi
 
 # --- Run it ------------------------------------------------------------------
+SOCKET_PATH="$DATA_DIR/lantern.sock"
 info "Starting lantern..."
+info "Control socket: $SOCKET_PATH"
 echo ""
-exec "$BINARY" serve -c "$TEMP_CONFIG"
+exec "$BINARY" serve -c "$TEMP_CONFIG" --socket "$SOCKET_PATH"

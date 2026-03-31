@@ -234,7 +234,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 	// 10. Create blocker, load blocklist files
 	blockMgr := blocker.New(logger)
 	for _, bl := range cfg.Blocklists {
-		if !bl.Enabled {
+		if !bl.Enabled || bl.Path == "" {
 			continue
 		}
 		count, err := blockMgr.LoadFile(bl.Path)
