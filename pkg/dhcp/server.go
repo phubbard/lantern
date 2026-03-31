@@ -507,9 +507,11 @@ func (s *Server) setDHCPOptions(reply *dhcpv4.DHCPv4) {
 }
 
 // extractClientID extracts the client ID from DHCP options.
+// Option 61 is typically raw bytes (hardware type + MAC), so we
+// hex-encode it for safe display and storage.
 func (s *Server) extractClientID(msg *dhcpv4.DHCPv4) string {
 	if opt := msg.Options.Get(dhcpv4.OptionClientIdentifier); opt != nil {
-		return string(opt)
+		return fmt.Sprintf("%x", opt)
 	}
 	return ""
 }
